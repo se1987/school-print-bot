@@ -3,13 +3,14 @@
 SQLiteを使って、プリント情報・抽出タスク・子ども情報を管理する
 """
 
+import os
 import sqlite3
 import json
 import re
 from pathlib import Path
 from contextlib import contextmanager
 
-DB_PATH = Path("school_prints.db")
+DB_PATH = Path(os.getenv("DB_PATH", "school_prints.db"))
 
 
 def init_db():

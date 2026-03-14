@@ -4,7 +4,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 
 ## 🏗️ アーキテクチャ
 
-```
+```text
 マチコミ → [スクショ/PDF] → LINE Bot → FastAPI → Gemini API（解析）
                                           ↓
                                      SQLite（保存）
@@ -24,7 +24,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 ## 📱 使い方
 
 | 操作 | 説明 |
-|------|------|
+| --- | --- |
 | 📸 画像/PDF送信 | プリントを解析してタスク抽出 |
 | 🔍 キーワード送信 | 過去のプリントを検索 |
 | 📋 「タスク一覧」 | 未対応タスクを表示 |
@@ -35,14 +35,16 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 ### 子ども登録の効果
 
 登録前（学校だよりの卒業式の日）:
-```
+
+```text
 📅 卒業証書授与式 (2026-03-17)
    ⏰ 1〜4年: 13:00
    ⏰ 5年: 13:30
 ```
 
 登録後（「子ども登録 たろう 1年」の場合）:
-```
+
+```text
 📅 卒業証書授与式 (2026-03-17)
    ⏰ たろう: 13:00
 ```
@@ -76,6 +78,25 @@ cp .env.example .env
 python src/main.py
 ```
 
+### Docker で起動する場合
+
+```bash
+# .env を用意（DB_PATH を Docker 用に設定）
+cp .env.example .env
+# .env を編集して各APIキーを設定、DB_PATH=/app/data/school_prints.db に変更
+
+# 起動
+docker compose up -d
+
+# ログ確認
+docker compose logs -f
+
+# 停止
+docker compose down
+```
+
+> SQLite のデータは `./data/` にボリュームマウントされるため、コンテナを再起動してもデータは保持されます。
+
 ### Railway デプロイ
 
 1. GitHubにpush
@@ -86,15 +107,15 @@ python src/main.py
 
 ### TimeTree連携
 
-TimeTree APIは終了済みですが、間接連携が可能です:
+TimeTree APIは終了済みですが、間接連携が可能です。
 
-**Googleカレンダー → iPhone標準カレンダー同期 → TimeTreeインポート**
+Googleカレンダー → iPhone標準カレンダー同期 → TimeTreeインポート
 
 iPhoneの設定 → カレンダー → アカウント → Googleアカウントを追加するだけで自動同期されます。
 
 ## 📁 ファイル構成
 
-```
+```text
 school-print-bot/
 ├── src/
 │   ├── main.py             # FastAPI エントリーポイント
@@ -103,6 +124,8 @@ school-print-bot/
 │   ├── database.py         # SQLite + 学年マッチングロジック
 │   └── scheduler.py        # パーソナライズ対応リマインドスケジューラー
 ├── docs/                   # 備忘録・設計資料（React コンポーネント）
+├── Dockerfile
+├── docker-compose.yml
 ├── requirements.txt
 ├── Procfile                # Railway用
 ├── .env.example
