@@ -21,6 +21,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 - **リマインド**: 毎朝7時にLINEで翌日の予定を自動通知
 - **自動進級**: 毎年4月1日に学年を自動更新（卒業学年は手動更新を通知）
 - **全文検索**: 過去のプリントをキーワードで検索
+- **Googleカレンダー連携**: プリント解析後に自動でカレンダーへ登録（オプション）
 
 ## 📱 使い方
 
@@ -106,13 +107,34 @@ docker compose down
 4. Generate Domain → URLを取得
 5. LINE Developers → Webhook URL に `https://your-app.up.railway.app/callback` を設定
 
-### TimeTree連携
+### Google Calendar連携（オプション）
 
-TimeTree APIは終了済みですが、間接連携が可能です。
+プリント解析時に自動でGoogleカレンダーへ予定を登録します。
 
-Googleカレンダー → iPhone標準カレンダー同期 → TimeTreeインポート
+#### 初回セットアップ
 
-iPhoneの設定 → カレンダー → アカウント → Googleアカウントを追加するだけで自動同期されます。
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成
+1. **Google Calendar API** を有効化
+1. **OAuth 2.0 クライアントID** を作成（アプリケーション種別: デスクトップアプリ）
+1. クライアントシークレットJSONをダウンロードし `scripts/credentials.json` として保存
+1. 認証スクリプトを実行:
+
+```bash
+python scripts/authorize_google.py
+```
+
+1. 出力されたJSONを環境変数に設定:
+
+```bash
+# .env または Railway Variables
+GOOGLE_CALENDAR_CREDENTIALS_JSON='{"token": "...", "refresh_token": "...", ...}'
+```
+
+> `GOOGLE_CALENDAR_CREDENTIALS_JSON` が未設定の場合、カレンダー連携はスキップされます。他の機能は正常に動作します。
+
+#### TimeTree連携
+
+Googleカレンダー → iPhoneの設定 → カレンダー → アカウント → Googleアカウントを追加するだけで自動同期され、TimeTreeにもインポートできます。
 
 ## 📁 ファイル構成
 
