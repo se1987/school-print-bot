@@ -107,9 +107,9 @@ async def handle_text(event: MessageEvent):
     text = event.message.text.strip()
 
     # 子ども登録コマンド
-    child_match = re.match(r"子ども登録\s+(.+?)\s+(\d+)年", text)
+    child_match = re.match(r"子ども登録\s+(.+?)\s+(\S+年)", text)
     if child_match:
-        await _register_child(event, user_id, child_match.group(1), f"{child_match.group(2)}年")
+        await _register_child(event, user_id, child_match.group(1), child_match.group(2))
         return
 
     if text == "子ども登録":
@@ -117,7 +117,8 @@ async def handle_text(event: MessageEvent):
             event.reply_token,
             "👶 子どもを登録するには、以下の形式で送信してください:\n\n"
             "  子ども登録 たろう 1年\n"
-            "  子ども登録 はなこ 4年\n\n"
+            "  子ども登録 はなこ 4年\n"
+            "  子ども登録 じろう 中学1年\n\n"
             "登録すると、学年に合った下校時刻やタスクだけを\n"
             "リマインドでお届けします！"
         )
