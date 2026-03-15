@@ -366,6 +366,10 @@ def _format_analysis_result(result: dict, children: list[dict], cal_count: int =
         lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
         if cal_count > 0:
             lines.append(f"📅 {cal_count}件をGoogleカレンダーに登録しました")
+            lines.append(
+                "🌳 TimeTreeでも確認できます\n"
+                "   設定方法: https://support.timetreeapp.com/hc/ja/articles/360000629341"
+            )
 
     if not children:
         lines.append("\n💡 「子ども登録 名前 ◯年」で\n   学年に合った下校時刻を表示できます")
