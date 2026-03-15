@@ -15,7 +15,7 @@ from google.genai import types
 client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 # 使用するモデル（無料枠あり・高速）
-MODEL_NAME = "gemini-2.0-flash"
+MODEL_NAME = "gemini-1.5-flash"
 
 # タスク抽出用のシステムプロンプト
 SYSTEM_PROMPT = """あなたは学校から配布されるプリントを解析する、保護者向けアシスタントです。
