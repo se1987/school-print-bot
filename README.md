@@ -19,6 +19,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 - **学年別下校時刻**: 同じ日でも学年ごとに異なる下校時刻を正確に把握
 - **子ども登録**: 兄弟の学年を登録すると、その子に関係ある情報だけを通知
 - **リマインド**: 毎朝7時にLINEで翌日の予定を自動通知
+- **自動進級**: 毎年4月1日に学年を自動更新（卒業学年は手動更新を通知）
 - **全文検索**: 過去のプリントをキーワードで検索
 
 ## 📱 使い方
@@ -28,7 +29,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 | 📸 画像/PDF送信 | プリントを解析してタスク抽出 |
 | 🔍 キーワード送信 | 過去のプリントを検索 |
 | 📋 「タスク一覧」 | 未対応タスクを表示 |
-| 👶 「子ども登録 たろう 1年」 | 子どもの学年を登録 |
+| 👶 「子ども登録 たろう 1年」 | 子どもの学年を登録（中学1年・高校2年なども可） |
 | 👨‍👩‍👧‍👦 「子ども一覧」 | 登録済みの子どもを確認 |
 | ❓ 「ヘルプ」 | 使い方を表示 |
 
@@ -101,7 +102,7 @@ docker compose down
 
 1. GitHubにpush
 2. Railway → New Project → Deploy from GitHub
-3. Variables に `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY`, `PORT=8000` を設定
+3. Variables に `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY` を設定（`PORT` は Railway が自動注入）
 4. Generate Domain → URLを取得
 5. LINE Developers → Webhook URL に `https://your-app.up.railway.app/callback` を設定
 
@@ -127,7 +128,6 @@ school-print-bot/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── Procfile                # Railway用
 ├── .env.example
 └── .gitignore
 ```
@@ -136,5 +136,4 @@ school-print-bot/
 
 - [ ] Google カレンダー連携（ボタンタップで登録）
 - [ ] Rich Menu（メニューボタン）
-- [ ] 進級時の一括学年更新
 - [ ] 個人懇談の地区別リマインド
