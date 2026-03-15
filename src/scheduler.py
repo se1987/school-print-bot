@@ -114,12 +114,64 @@ def _build_generic_reminder(tasks: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _advance_grade(grade: str) -> tuple[str, bool]:
+    """
+    学年を1つ進める
+    Returns: (new_grade, is_graduated)
+    卒業学年（小6・中学3年・高校3年）の場合は is_graduated=True を返す
+    """
+    import re
+    match = re.match(r"(中学|高校|中|高)?(\d+)年", grade)
+    if not match:
+        return grade, False
+    prefix = match.group(1) or ""
+    num = int(match.group(2))
+    if (prefix == "" and num >= 6) or (prefix in ("中学", "中") and num >= 3) or (prefix in ("高校", "高") and num >= 3):
+        return grade, True
+    return f"{prefix}{num + 1}年", False
+
+
+async def advance_grades_april():
+    """4月1日 9時 JST に全員の学年を1つ進める"""
+    from line_handler import _push_text
+    print("🎓 学年自動進級処理開始...")
+    children = db.get_all_children()
+    for child in children:
+        new_grade, graduated = _advance_grade(child["grade"])
+        try:
+            if graduated:
+                await _push_text(
+                    child["user_id"],
+                    f"🎓 {child['name']}さん（{child['grade']}）は卒業学年です。\n"
+                    "進学先の学年に更新するか、削除してください。\n\n"
+                    f"例: 子ども登録 {child['name']} 中学1年\n"
+                    f"削除: 子ども削除 {child['name']}"
+                )
+            else:
+                db.update_child_grade(child["id"], new_grade)
+                await _push_text(
+                    child["user_id"],
+                    f"🎒 新学年おめでとうございます！\n"
+                    f"{child['name']}さんの学年を {child['grade']} → {new_grade} に更新しました。"
+                )
+        except Exception as e:
+            print(f"  ❌ {child['user_id']} への進級通知失敗: {e}")
+    print(f"  ✅ {len(children)} 件の学年を処理しました")
+
+
 def start_scheduler():
     # 毎朝7時 JST = UTC 22:00（前日）
     scheduler.add_job(
         send_daily_reminders,
         CronTrigger(hour=22, minute=0),
         id="daily_reminder",
+        replace_existing=True,
+    )
+    # 4月1日 9時 JST = UTC 0時（4月1日）
+    scheduler.add_job(
+        advance_grades_april,
+        CronTrigger(month=4, day=1, hour=0, minute=0),
+        id="advance_grades",
         replace_existing=True,
     )
     scheduler.start()

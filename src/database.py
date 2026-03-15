@@ -79,6 +79,15 @@ def add_child(user_id: str, name: str, grade: str) -> int:
         return cursor.lastrowid
 
 
+def get_all_children() -> list[dict]:
+    """全ユーザーの子ども一覧を返す（進級処理用）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, name, grade FROM children ORDER BY user_id"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
 def get_children(user_id: str) -> list[dict]:
     with get_connection() as conn:
         rows = conn.execute(
