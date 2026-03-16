@@ -1,28 +1,32 @@
 """
 リマインドスケジューラー
-毎朝7時（JST）に翌日の予定を、子どもの学年に合わせてLINEで通知する
+毎朝7時（JST）に当日・翌日の予定を、子どもの学年に合わせてLINEで通知する
 """
+
+import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 import database as db
 
+logger = logging.getLogger(__name__)
+
 scheduler = AsyncIOScheduler()
 
 
 async def send_daily_reminders():
     """当日＋翌日が期限のタスクを、各ユーザーの子どもの学年に合わせて通知"""
-    from line_handler import _push_text
+    from line_client import push_text
 
-    print("🔔 リマインドチェック開始...")
+    logger.info("[Scheduler] リマインドチェック開始")
 
     # 当日(days_before=0)と翌日(days_before=1)のタスクを両方取得
     today_tasks = db.get_tasks_for_reminder(days_before=0)
     tomorrow_tasks = db.get_tasks_for_reminder(days_before=1)
 
     if not today_tasks and not tomorrow_tasks:
-        print("  → リマインド対象なし")
+        logger.info("[Scheduler] リマインド対象なし")
         return
 
     # ユーザーごとにグループ化
@@ -47,12 +51,12 @@ async def send_daily_reminders():
             message = _build_generic_reminder(today_list, tomorrow_list)
 
         try:
-            await _push_text(user_id, message)
+            await push_text(user_id, message)
             for task in today_list + tomorrow_list:
                 db.mark_task_reminded(task["id"])
-            print(f"  ✅ {user_id} に通知完了")
+            logger.info("[Scheduler] %s に通知完了", user_id)
         except Exception as e:
-            print(f"  ❌ {user_id} への通知失敗: {e}")
+            logger.error("[Scheduler] %s への通知失敗: %s", user_id, e)
 
 
 def _build_task_section(tasks: list[dict], children: list[dict] | None, label: str) -> list[str]:
@@ -145,14 +149,14 @@ def _advance_grade(grade: str) -> tuple[str, bool]:
 
 async def advance_grades_april():
     """4月1日 9時 JST に全員の学年を1つ進める"""
-    from line_handler import _push_text
-    print("🎓 学年自動進級処理開始...")
+    from line_client import push_text
+    logger.info("[Scheduler] 学年自動進級処理開始")
     children = db.get_all_children()
     for child in children:
         new_grade, graduated = _advance_grade(child["grade"])
         try:
             if graduated:
-                await _push_text(
+                await push_text(
                     child["user_id"],
                     f"🎓 {child['name']}さん（{child['grade']}）は卒業学年です。\n"
                     "進学先の学年に更新するか、削除してください。\n\n"
@@ -161,14 +165,14 @@ async def advance_grades_april():
                 )
             else:
                 db.update_child_grade(child["id"], new_grade)
-                await _push_text(
+                await push_text(
                     child["user_id"],
                     f"🎒 新学年おめでとうございます！\n"
                     f"{child['name']}さんの学年を {child['grade']} → {new_grade} に更新しました。"
                 )
         except Exception as e:
-            print(f"  ❌ {child['user_id']} への進級通知失敗: {e}")
-    print(f"  ✅ {len(children)} 件の学年を処理しました")
+            logger.error("[Scheduler] %s への進級通知失敗: %s", child["user_id"], e)
+    logger.info("[Scheduler] %d 件の学年を処理しました", len(children))
 
 
 def start_scheduler():
@@ -187,4 +191,4 @@ def start_scheduler():
         replace_existing=True,
     )
     scheduler.start()
-    print("⏰ リマインドスケジューラー起動（毎朝7時 JST）")
+    logger.info("[Scheduler] リマインドスケジューラー起動（毎朝7時 JST）")

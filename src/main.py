@@ -5,22 +5,68 @@ FastAPI + LINE Messaging API + Gemini API
 プリントのPDF/画像からタスクを自動抽出し、カレンダー登録・リマインドを行う
 """
 
+import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request, HTTPException
-
-from linebot.v3.webhook import WebhookParser
-from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.webhooks import MessageEvent
-
-import database as db
-import line_handler
-from scheduler import start_scheduler
 
 # 環境変数読み込み（.envファイル）
 load_dotenv()
+
+# --- ログ設定 ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# 起動時の設定バリデーション
+# ============================================================
+
+REQUIRED_ENV_VARS = [
+    "LINE_CHANNEL_SECRET",
+    "LINE_CHANNEL_ACCESS_TOKEN",
+    "GEMINI_API_KEY",
+]
+
+OPTIONAL_ENV_VARS = [
+    "GOOGLE_CALENDAR_CREDENTIALS_JSON",
+    "GOOGLE_CALENDAR_ID",
+    "DB_PATH",
+]
+
+
+def validate_env():
+    """必須環境変数の存在チェック。不足時はエラー終了"""
+    missing = [v for v in REQUIRED_ENV_VARS if not os.getenv(v)]
+    if missing:
+        logger.critical("必須環境変数が未設定です: %s", ", ".join(missing))
+        sys.exit(1)
+
+    for v in OPTIONAL_ENV_VARS:
+        if os.getenv(v):
+            logger.info("  ✓ %s: 設定済み", v)
+        else:
+            logger.info("  - %s: 未設定（オプション）", v)
+
+
+validate_env()
+
+# --- 以下、環境変数が確定してからインポート ---
+from fastapi import FastAPI, Request, HTTPException  # noqa: E402
+
+from linebot.v3.webhook import WebhookParser  # noqa: E402
+from linebot.v3.exceptions import InvalidSignatureError  # noqa: E402
+from linebot.v3.webhooks import MessageEvent  # noqa: E402
+
+import database as db  # noqa: E402
+import line_handler  # noqa: E402
+from scheduler import start_scheduler  # noqa: E402
 
 
 # ============================================================
@@ -33,16 +79,16 @@ async def lifespan(app: FastAPI):
     # --- 起動時 ---
     db.init_db()
     start_scheduler()
-    print("🚀 学校プリント管理Bot 起動完了！")
+    logger.info("学校プリント管理Bot 起動完了")
     yield
     # --- 終了時 ---
-    print("👋 Bot を停止します")
+    logger.info("Bot を停止します")
 
 
 app = FastAPI(
     title="学校プリント管理Bot",
     description="LINEにプリントを送ると、AIがタスクを抽出してくれるBot",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 

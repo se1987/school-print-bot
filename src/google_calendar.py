@@ -8,12 +8,15 @@ Google Calendar連携モジュール
 """
 
 import json
+import logging
 import os
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+logger = logging.getLogger(__name__)
 
 CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
 SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
@@ -103,7 +106,8 @@ def register_task_to_calendar(task: dict) -> str | None:
 
     try:
         result = service.events().insert(calendarId=CALENDAR_ID, body=event).execute()
+        logger.info("[Calendar] イベント登録成功: %s (%s)", title, due_date)
         return result.get("id")
     except HttpError as e:
-        print(f"⚠️ Googleカレンダー登録エラー: {e}")
+        logger.error("[Calendar] イベント登録エラー: %s", e)
         return None

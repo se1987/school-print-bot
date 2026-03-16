@@ -3,17 +3,9 @@ LINE Bot Webhook ハンドラー
 ユーザーからのメッセージを処理し、適切な応答を返す
 """
 
-import os
+import logging
 import re
-import aiohttp
-from linebot.v3.messaging import (
-    AsyncApiClient,
-    AsyncMessagingApi,
-    Configuration,
-    ReplyMessageRequest,
-    PushMessageRequest,
-    TextMessage,
-)
+
 from linebot.v3.webhooks import (
     MessageEvent,
     TextMessageContent,
@@ -24,10 +16,12 @@ from linebot.v3.webhooks import (
 import database as db
 import gemini_client
 import google_calendar
+from line_client import reply_text, push_text, download_content
 
-config = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
-async_api_client = AsyncApiClient(config)
-line_api = AsyncMessagingApi(async_api_client)
+logger = logging.getLogger(__name__)
+
+# 検索キーワードの最大長
+MAX_KEYWORD_LENGTH = 200
 
 
 # ============================================================
@@ -54,12 +48,12 @@ async def handle_image(event: MessageEvent):
     await reply_text(event.reply_token, "📄 プリントを解析中です...\nしばらくお待ちください。")
 
     try:
-        image_bytes = await _download_content(message_id)
+        image_bytes = await download_content(message_id)
         result = await gemini_client.analyze_image(image_bytes, "image/jpeg")
         await _save_and_reply(user_id, result)
     except Exception as e:
-        print(f"❌ 画像処理エラー: {e}")
-        await _push_text(user_id, "⚠️ 解析中にエラーが発生しました。\nもう一度送信してみてください。")
+        logger.error("[Handler] 画像処理エラー: %s", e)
+        await push_text(user_id, "⚠️ 解析中にエラーが発生しました。\nもう一度送信してみてください。")
 
 
 async def handle_file(event: MessageEvent):
@@ -74,12 +68,12 @@ async def handle_file(event: MessageEvent):
     await reply_text(event.reply_token, "📄 PDFを解析中です...\nしばらくお待ちください。")
 
     try:
-        pdf_bytes = await _download_content(message_id)
+        pdf_bytes = await download_content(message_id)
         result = await gemini_client.analyze_pdf(pdf_bytes)
         await _save_and_reply(user_id, result)
     except Exception as e:
-        print(f"❌ PDF処理エラー: {e}")
-        await _push_text(user_id, "⚠️ 解析中にエラーが発生しました。\nもう一度送信してみてください。")
+        logger.error("[Handler] PDF処理エラー: %s", e)
+        await push_text(user_id, "⚠️ 解析中にエラーが発生しました。\nもう一度送信してみてください。")
 
 
 async def _save_and_reply(user_id: str, result: dict):
@@ -103,24 +97,33 @@ async def _save_and_reply(user_id: str, result: dict):
 
     children = db.get_children(user_id)
     response_text = _format_analysis_result(result, children, cal_count)
-    await _push_text(user_id, response_text)
+    await push_text(user_id, response_text)
 
 
 # ============================================================
 # テキストコマンド処理
 # ============================================================
 
+# 「子ども」「子供」「こども」の表記ゆらぎに対応
+_CHILD_VARIANTS = r"(?:子ども|子供|こども)"
+
+_CHILD_REGISTER_RE = re.compile(rf"{_CHILD_VARIANTS}登録\s+(.+?)\s+(\S+年)")
+_CHILD_DELETE_RE = re.compile(rf"{_CHILD_VARIANTS}削除\s+(.+)")
+_CHILD_LIST_KEYWORDS = {"子ども一覧", "子ども", "子供一覧", "子供", "こども一覧", "こども"}
+_CHILD_REGISTER_KEYWORDS = {"子ども登録", "子供登録", "こども登録"}
+
+
 async def handle_text(event: MessageEvent):
     user_id = event.source.user_id
     text = event.message.text.strip()
 
     # 子ども登録コマンド
-    child_match = re.match(r"子ども登録\s+(.+?)\s+(\S+年)", text)
+    child_match = _CHILD_REGISTER_RE.match(text)
     if child_match:
         await _register_child(event, user_id, child_match.group(1), child_match.group(2))
         return
 
-    if text == "子ども登録":
+    if text in _CHILD_REGISTER_KEYWORDS:
         await reply_text(
             event.reply_token,
             "👶 子どもを登録するには、以下の形式で送信してください:\n\n"
@@ -132,11 +135,11 @@ async def handle_text(event: MessageEvent):
         )
         return
 
-    if text in ("子ども一覧", "子ども"):
+    if text in _CHILD_LIST_KEYWORDS:
         await _show_children(event, user_id)
         return
 
-    child_del = re.match(r"子ども削除\s+(.+)", text)
+    child_del = _CHILD_DELETE_RE.match(text)
     if child_del:
         await _delete_child(event, user_id, child_del.group(1))
         return
@@ -193,7 +196,7 @@ async def _show_children(event, user_id):
     for c in children:
         lines.append(f"  🎒 {c['name']}（{c['grade']}）")
     lines.append("\n💡 削除: 「子ども削除 名前」")
-    lines.append("💡 進級時は削除→再登録してください")
+    lines.append("💡 進級は毎年4月1日に自動で行われます")
     await reply_text(event.reply_token, "\n".join(lines))
 
 
@@ -275,10 +278,14 @@ async def _test_reminder(event, user_id):
     from scheduler import send_daily_reminders
     await reply_text(event.reply_token, "🔔 通知テストを実行中...")
     await send_daily_reminders()
-    await _push_text(user_id, "✅ 通知テスト完了\n対象タスクがない場合は通知は送信されません。")
+    await push_text(user_id, "✅ 通知テスト完了\n対象タスクがない場合は通知は送信されません。")
 
 
 async def _search_prints(event, user_id, keyword):
+    if len(keyword) > MAX_KEYWORD_LENGTH:
+        await reply_text(event.reply_token, f"⚠️ 検索キーワードが長すぎます（{MAX_KEYWORD_LENGTH}文字以内にしてください）")
+        return
+
     results = db.search_prints(user_id, keyword)
     if not results:
         await reply_text(
@@ -416,35 +423,3 @@ def _format_analysis_result(result: dict, children: list[dict], cal_count: int =
         lines.append("\n💡 「子ども登録 名前 ◯年」で\n   学年に合った下校時刻を表示できます")
 
     return "\n".join(lines)
-
-
-# ============================================================
-# LINE API ヘルパー
-# ============================================================
-
-async def reply_text(reply_token: str, text: str):
-    try:
-        await line_api.reply_message(
-            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text)])
-        )
-    except Exception as e:
-        print(f"⚠️ Reply失敗: {e}")
-
-
-async def _push_text(user_id: str, text: str):
-    try:
-        await line_api.push_message(
-            PushMessageRequest(to=user_id, messages=[TextMessage(text=text)])
-        )
-    except Exception as e:
-        print(f"⚠️ Push失敗: {e}")
-
-
-async def _download_content(message_id: str) -> bytes:
-    url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
-    headers = {"Authorization": f"Bearer {os.getenv('LINE_CHANNEL_ACCESS_TOKEN')}"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as resp:
-            if resp.status != 200:
-                raise Exception(f"LINEコンテンツ取得失敗: status={resp.status}")
-            return await resp.read()
