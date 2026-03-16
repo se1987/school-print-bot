@@ -69,22 +69,26 @@ class TestBuildTaskSection:
         }
 
     def test_empty_tasks_returns_empty(self):
-        assert _build_task_section([], None, "📌 今日") == []
+        lines, count = _build_task_section([], None, "📌 今日")
+        assert lines == []
+        assert count == 0
 
     def test_section_with_tasks_no_children(self):
         tasks = [self._make_task(title="参観日")]
-        lines = _build_task_section(tasks, None, "📌 今日の予定")
+        lines, count = _build_task_section(tasks, None, "📌 今日の予定")
         text = "\n".join(lines)
         assert "今日の予定" in text
         assert "参観日" in text
+        assert count == 1
 
     def test_section_with_children(self):
         tasks = [self._make_task(title="遠足")]
         children = [{"name": "たろう", "grade": "1年"}]
-        lines = _build_task_section(tasks, children, "📅 明日の予定")
+        lines, count = _build_task_section(tasks, children, "📅 明日の予定")
         text = "\n".join(lines)
         assert "たろう" in text
         assert "遠足" in text
+        assert count == 1
 
 
 class TestBuildReminder:

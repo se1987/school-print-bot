@@ -15,6 +15,30 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
 
 
+async def send_reminder_for_user(user_id: str) -> bool:
+    """指定ユーザー向けに当日・翌日のリマインドを1通だけ送る（通知テスト用）。送信したら True、対象がなければ False。"""
+    from line_client import push_text
+
+    today_tasks = db.get_tasks_for_reminder(days_before=0)
+    tomorrow_tasks = db.get_tasks_for_reminder(days_before=1)
+    today_list = [t for t in today_tasks if t["user_id"] == user_id]
+    tomorrow_list = [t for t in tomorrow_tasks if t["user_id"] == user_id]
+
+    if not today_list and not tomorrow_list:
+        return False
+
+    children = db.get_children(user_id)
+    if children:
+        message = _build_personalized_reminder(today_list, tomorrow_list, children)
+    else:
+        message = _build_generic_reminder(today_list, tomorrow_list)
+
+    await push_text(user_id, message)
+    for task in today_list + tomorrow_list:
+        db.mark_task_reminded(task["id"])
+    return True
+
+
 async def send_daily_reminders():
     """当日＋翌日が期限のタスクを、各ユーザーの子どもの学年に合わせて通知"""
     from line_client import push_text
@@ -59,11 +83,12 @@ async def send_daily_reminders():
             logger.error("[Scheduler] %s への通知失敗: %s", user_id, e)
 
 
-def _build_task_section(tasks: list[dict], children: list[dict] | None, label: str) -> list[str]:
-    """タスクリストを子ども別にフォーマットするヘルパー"""
+def _build_task_section(tasks: list[dict], children: list[dict] | None, label: str) -> tuple[list[str], int]:
+    """タスクリストを子ども別にフォーマットするヘルパー。戻り値は (行リスト, 表示したタスク数)。"""
     lines = []
+    displayed_ids: set[int] = set()
     if not tasks:
-        return lines
+        return lines, 0
 
     lines.append(f"\n{label}")
     lines.append("━━━━━━━━━━━━━━━━━")
@@ -75,6 +100,7 @@ def _build_task_section(tasks: list[dict], children: list[dict] | None, label: s
                 continue
             lines.append(f"  👤 {child['name']}（{child['grade']}）")
             for task in relevant:
+                displayed_ids.add(task["id"])
                 emoji = "📅" if task["task_type"] == "event" else "✏️"
                 lines.append(f"    {emoji} {task['title']}")
                 dismissal = db.get_dismissal_time_for_child(task, child["grade"])
@@ -84,8 +110,10 @@ def _build_task_section(tasks: list[dict], children: list[dict] | None, label: s
                 if desc:
                     lines.append(f"       {desc}")
             lines.append("")
+        displayed_count = len(displayed_ids)
     else:
         for task in tasks:
+            displayed_ids.add(task["id"])
             emoji = "📅" if task["task_type"] == "event" else "✏️"
             lines.append(f"  {emoji} {task['title']}")
             times = task.get("dismissal_times", [])
@@ -95,25 +123,26 @@ def _build_task_section(tasks: list[dict], children: list[dict] | None, label: s
             if desc:
                 lines.append(f"     {desc}")
         lines.append("")
+        displayed_count = len(tasks)
 
-    return lines
+    return lines, displayed_count
 
 
 def _build_personalized_reminder(today_tasks: list[dict], tomorrow_tasks: list[dict], children: list[dict]) -> str:
     """子どもの学年に合わせたリマインドメッセージを構築"""
     lines = ["🔔 おはようございます！"]
 
-    today_section = _build_task_section(today_tasks, children, "📌 今日の予定・タスク")
-    tomorrow_section = _build_task_section(tomorrow_tasks, children, "📅 明日の予定・タスク")
+    today_section, today_count = _build_task_section(today_tasks, children, "📌 今日の予定・タスク")
+    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, children, "📅 明日の予定・タスク")
+    total_displayed = today_count + tomorrow_count
 
-    if not today_section and not tomorrow_section:
+    if total_displayed == 0:
         return _build_generic_reminder(today_tasks, tomorrow_tasks)
 
     lines.extend(today_section)
     lines.extend(tomorrow_section)
 
-    total = len(today_tasks) + len(tomorrow_tasks)
-    lines.append(f"📋 合計 {total} 件です。準備を忘れずに！")
+    lines.append(f"📋 合計 {total_displayed} 件です。準備を忘れずに！")
     return "\n".join(lines)
 
 
@@ -121,11 +150,13 @@ def _build_generic_reminder(today_tasks: list[dict], tomorrow_tasks: list[dict])
     """子ども未登録時の汎用リマインドメッセージ"""
     lines = ["🔔 おはようございます！"]
 
-    lines.extend(_build_task_section(today_tasks, None, "📌 今日の予定・タスク"))
-    lines.extend(_build_task_section(tomorrow_tasks, None, "📅 明日の予定・タスク"))
+    today_section, today_count = _build_task_section(today_tasks, None, "📌 今日の予定・タスク")
+    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, None, "📅 明日の予定・タスク")
+    lines.extend(today_section)
+    lines.extend(tomorrow_section)
 
-    total = len(today_tasks) + len(tomorrow_tasks)
-    lines.append(f"📋 合計 {total} 件です。準備を忘れずに！")
+    total_displayed = today_count + tomorrow_count
+    lines.append(f"📋 合計 {total_displayed} 件です。準備を忘れずに！")
     lines.append("\n💡 「子ども登録」と送信すると、学年に合った通知になります")
     return "\n".join(lines)
 

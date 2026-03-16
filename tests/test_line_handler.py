@@ -1,10 +1,15 @@
 """
 line_handler.py のテスト
 - 子ども登録コマンドの正規表現パース（表記ゆらぎ対応）
-- 検索キーワード長の制限
+- 検索キーワード長の制限（validate_keyword）
 """
 
 import re
+
+import pytest
+
+# line_handler から検証関数と定数を取得（conftest で env 設定済み）
+from line_handler import MAX_KEYWORD_LENGTH, validate_keyword
 
 # line_handler.py と同じパターン
 _CHILD_VARIANTS = r"(?:子ども|子供|こども)"
@@ -13,8 +18,6 @@ CHILD_DELETE_PATTERN = re.compile(rf"{_CHILD_VARIANTS}削除\s+(.+)")
 
 CHILD_LIST_KEYWORDS = {"子ども一覧", "子ども", "子供一覧", "子供", "こども一覧", "こども"}
 CHILD_REGISTER_KEYWORDS = {"子ども登録", "子供登録", "こども登録"}
-
-MAX_KEYWORD_LENGTH = 200
 
 
 class TestChildRegisterPattern:
@@ -92,9 +95,10 @@ class TestChildVariantKanji:
 
 class TestKeywordLength:
     def test_within_limit(self):
-        keyword = "a" * MAX_KEYWORD_LENGTH
-        assert len(keyword) <= MAX_KEYWORD_LENGTH
+        """MAX_KEYWORD_LENGTH ちょうどは validate_keyword で許可される"""
+        validate_keyword("a" * MAX_KEYWORD_LENGTH)
 
-    def test_exceeds_limit(self):
-        keyword = "a" * (MAX_KEYWORD_LENGTH + 1)
-        assert len(keyword) > MAX_KEYWORD_LENGTH
+    def test_exceeds_limit_raises(self):
+        """MAX_KEYWORD_LENGTH + 1 は validate_keyword が ValueError を送出する"""
+        with pytest.raises(ValueError):
+            validate_keyword("a" * (MAX_KEYWORD_LENGTH + 1))

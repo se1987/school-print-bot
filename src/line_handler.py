@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 MAX_KEYWORD_LENGTH = 200
 
 
+def validate_keyword(keyword: str) -> None:
+    """検索キーワードの長さを検証する。超過時は ValueError を送出する。"""
+    if len(keyword) > MAX_KEYWORD_LENGTH:
+        raise ValueError(f"検索キーワードが長すぎます（{MAX_KEYWORD_LENGTH}文字以内にしてください）")
+
+
 # ============================================================
 # メッセージ振り分け
 # ============================================================
@@ -274,16 +280,21 @@ async def _show_all_tasks(event, user_id):
 
 
 async def _test_reminder(event, user_id):
-    """通知テスト: リマインドを即時実行"""
-    from scheduler import send_daily_reminders
+    """通知テスト: リクエストしたユーザー向けにリマインドを1通だけ即時送信"""
+    from scheduler import send_reminder_for_user
     await reply_text(event.reply_token, "🔔 通知テストを実行中...")
-    await send_daily_reminders()
-    await push_text(user_id, "✅ 通知テスト完了\n対象タスクがない場合は通知は送信されません。")
+    sent = await send_reminder_for_user(user_id)
+    if sent:
+        await push_text(user_id, "✅ 通知テスト完了\n対象のタスク・予定を送信しました。")
+    else:
+        await reply_text(event.reply_token, "✅ 通知テスト完了\n当日・翌日が期限のタスクはありませんでした。")
 
 
 async def _search_prints(event, user_id, keyword):
-    if len(keyword) > MAX_KEYWORD_LENGTH:
-        await reply_text(event.reply_token, f"⚠️ 検索キーワードが長すぎます（{MAX_KEYWORD_LENGTH}文字以内にしてください）")
+    try:
+        validate_keyword(keyword)
+    except ValueError as e:
+        await reply_text(event.reply_token, f"⚠️ {e}")
         return
 
     results = db.search_prints(user_id, keyword)
