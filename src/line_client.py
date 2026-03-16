@@ -65,6 +65,8 @@ async def push_text(user_id: str, text: str) -> None:
 async def download_content(message_id: str) -> bytes:
     """LINEサーバーからメッセージコンテンツ（画像/PDF）をダウンロード"""
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+    if not token:
+        raise ValueError("LINE_CHANNEL_ACCESS_TOKEN environment variable is required")
     url = f"https://api-data.line.me/v2/bot/message/{message_id}/content"
     headers = {"Authorization": f"Bearer {token}"}
     timeout = aiohttp.ClientTimeout(total=CONTENT_DOWNLOAD_TIMEOUT)
