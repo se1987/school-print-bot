@@ -160,8 +160,21 @@ def get_pending_tasks(user_id: str) -> list[dict]:
         rows = conn.execute(
             """SELECT id, title, description, due_date, task_type, target_grades, dismissal_times
                FROM tasks
-               WHERE user_id = ? AND is_registered_to_calendar = 0 AND due_date >= date('now')
+               WHERE user_id = ? AND due_date >= date('now')
                ORDER BY due_date ASC""",
+            (user_id,),
+        ).fetchall()
+        return [_deserialize_task(row) for row in rows]
+
+
+def get_all_tasks(user_id: str) -> list[dict]:
+    """期限切れを含む全タスクを返す"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT id, title, description, due_date, task_type, target_grades, dismissal_times
+               FROM tasks
+               WHERE user_id = ?
+               ORDER BY due_date DESC""",
             (user_id,),
         ).fetchall()
         return [_deserialize_task(row) for row in rows]

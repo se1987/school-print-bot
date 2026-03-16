@@ -145,6 +145,14 @@ async def handle_text(event: MessageEvent):
         await _show_pending_tasks(event, user_id)
         return
 
+    if text in ("全タスク", "タスク履歴"):
+        await _show_all_tasks(event, user_id)
+        return
+
+    if text == "通知テスト":
+        await _test_reminder(event, user_id)
+        return
+
     if text in ("ヘルプ", "使い方"):
         await _show_help(event)
         return
@@ -242,6 +250,34 @@ async def _show_pending_tasks(event, user_id):
     await reply_text(event.reply_token, "\n".join(lines))
 
 
+async def _show_all_tasks(event, user_id):
+    """期限切れを含む全タスクを表示"""
+    tasks = db.get_all_tasks(user_id)
+    if not tasks:
+        await reply_text(event.reply_token, "📋 タスクはまだ登録されていません。\nプリントの画像やPDFを送ってください！")
+        return
+
+    from datetime import date
+    today = date.today().isoformat()
+
+    lines = ["📋 全タスク一覧\n"]
+    for task in tasks:
+        emoji = "📅" if task["task_type"] == "event" else "✏️"
+        due = task["due_date"] or "日付未定"
+        expired = " ⚠️期限切れ" if task["due_date"] and task["due_date"] < today else ""
+        lines.append(f"{emoji} {task['title']}（{due}）{expired}")
+    lines.append(f"\n合計 {len(tasks)} 件")
+    await reply_text(event.reply_token, "\n".join(lines))
+
+
+async def _test_reminder(event, user_id):
+    """通知テスト: リマインドを即時実行"""
+    from scheduler import send_daily_reminders
+    await reply_text(event.reply_token, "🔔 通知テストを実行中...")
+    await send_daily_reminders()
+    await _push_text(user_id, "✅ 通知テスト完了\n対象タスクがない場合は通知は送信されません。")
+
+
 async def _search_prints(event, user_id, keyword):
     results = db.search_prints(user_id, keyword)
     if not results:
@@ -278,16 +314,21 @@ async def _show_help(event):
         "→ 過去のプリントを検索\n\n"
         "📋 「タスク一覧」\n"
         "→ 未対応タスクを表示\n\n"
+        "📋 「全タスク」\n"
+        "→ 期限切れ含む全タスクを表示\n\n"
+        "🔔 「通知テスト」\n"
+        "→ リマインド通知を即時実行\n\n"
         "👶 「子ども登録 名前 ◯年」\n"
         "→ 学年別の下校時刻を通知\n"
-        "  例: 子ども登録 たろう 1年\n\n"
+        "  例: 子ども登録 たろう 1年\n"
+        "  例: 子ども登録 じろう 中学1年\n\n"
         "👨‍👩‍👧‍👦 「子ども一覧」\n"
         "→ 登録済みの子どもを確認\n\n"
         "❓ 「ヘルプ」\n"
         "→ この使い方を表示\n\n"
         "━━━━━━━━━━━━━━━━━\n"
         "💡 スクショでもPDFでもOK！\n"
-        "🔔 毎朝7時にリマインドをお届け"
+        "🔔 毎朝7時に当日・翌日のリマインドをお届け"
     )
 
 
