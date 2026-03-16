@@ -33,7 +33,12 @@ async def send_reminder_for_user(user_id: str) -> bool:
     else:
         message = _build_generic_reminder(today_list, tomorrow_list)
 
-    await push_text(user_id, message)
+    try:
+        await push_text(user_id, message)
+    except Exception as e:
+        logger.error("[Scheduler] %s への通知失敗: %s", user_id, e)
+        return False
+
     for task in today_list + tomorrow_list:
         db.mark_task_reminded(task["id"])
     return True

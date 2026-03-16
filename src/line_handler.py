@@ -287,7 +287,7 @@ async def _test_reminder(event, user_id):
     if sent:
         await push_text(user_id, "✅ 通知テスト完了\n対象のタスク・予定を送信しました。")
     else:
-        await reply_text(event.reply_token, "✅ 通知テスト完了\n当日・翌日が期限のタスクはありませんでした。")
+        await push_text(user_id, "✅ 通知テスト完了\n当日・翌日が期限のタスクはありませんでした。")
 
 
 async def _search_prints(event, user_id, keyword):
