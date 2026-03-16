@@ -1,5 +1,8 @@
 # 📚 学校プリント管理Bot
 
+[![Zenn](https://img.shields.io/badge/Zenn-記事を読む-3EA8FF?logo=zenn)](https://zenn.dev/se1987/articles/907cd432d8d15d)
+[![Qiita](https://img.shields.io/badge/Qiita-記事を読む-55C500?logo=qiita)](https://qiita.com/se1987/items/640d3b3d649eacf42cca)
+
 LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダー登録 → リマインド通知
 
 ## 🏗️ アーキテクチャ
