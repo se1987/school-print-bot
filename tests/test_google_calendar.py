@@ -54,8 +54,11 @@ class TestRegisterTaskToCalendar:
 
         mock_exec = MagicMock()
         mock_exec.execute.return_value = {"id": "evt123"}
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {"items": []}
         mock_events = MagicMock()
         mock_events.insert.return_value = mock_exec
+        mock_events.list.return_value = mock_list_exec
         mock_service = MagicMock()
         mock_service.events.return_value = mock_events
 
@@ -73,8 +76,11 @@ class TestRegisterTaskToCalendar:
         mock_exec.execute.side_effect = HttpError(
             resp=MagicMock(status=403), content=b"Forbidden"
         )
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {"items": []}
         mock_events = MagicMock()
         mock_events.insert.return_value = mock_exec
+        mock_events.list.return_value = mock_list_exec
         mock_service = MagicMock()
         mock_service.events.return_value = mock_events
 
@@ -91,10 +97,14 @@ class TestRegisterTaskToCalendar:
         mock_exec = MagicMock()
         mock_exec.execute.return_value = {"id": "evt456"}
 
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {"items": []}
+
         mock_events = MagicMock()
         mock_events.insert.side_effect = lambda calendarId, body: (
             captured.update(body) or mock_exec
         )
+        mock_events.list.return_value = mock_list_exec
 
         mock_service = MagicMock()
         mock_service.events.return_value = mock_events
@@ -103,3 +113,44 @@ class TestRegisterTaskToCalendar:
             google_calendar.register_task_to_calendar(self._make_task())
 
         assert "下校時刻" in captured.get("description", "")
+
+    def test_skips_insert_when_duplicate_exists(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
+
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {
+            "items": [{"summary": "運動会", "id": "existing_evt"}]
+        }
+        mock_events = MagicMock()
+        mock_events.list.return_value = mock_list_exec
+
+        mock_service = MagicMock()
+        mock_service.events.return_value = mock_events
+
+        with patch("google_calendar._build_service", return_value=mock_service):
+            result = google_calendar.register_task_to_calendar(self._make_task())
+
+        assert result == "existing_evt"
+        mock_events.insert.assert_not_called()
+
+    def test_inserts_when_no_duplicate(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
+
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {"items": []}
+
+        mock_insert_exec = MagicMock()
+        mock_insert_exec.execute.return_value = {"id": "new_evt"}
+
+        mock_events = MagicMock()
+        mock_events.list.return_value = mock_list_exec
+        mock_events.insert.return_value = mock_insert_exec
+
+        mock_service = MagicMock()
+        mock_service.events.return_value = mock_events
+
+        with patch("google_calendar._build_service", return_value=mock_service):
+            result = google_calendar.register_task_to_calendar(self._make_task())
+
+        assert result == "new_evt"
+        mock_events.insert.assert_called_once()

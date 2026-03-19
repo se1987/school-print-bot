@@ -35,6 +35,7 @@ def init_db():
                 target_grades TEXT DEFAULT '["全学年"]',
                 dismissal_times TEXT DEFAULT '[]',
                 is_registered_to_calendar INTEGER DEFAULT 0,
+                calendar_event_id TEXT,
                 is_reminded INTEGER DEFAULT 0,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (print_id) REFERENCES prints(id)
@@ -51,6 +52,11 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
             CREATE INDEX IF NOT EXISTS idx_children_user ON children(user_id);
         """)
+        # 既存DBにカラムを追加（マイグレーション）
+        try:
+            conn.execute("ALTER TABLE tasks ADD COLUMN calendar_event_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # カラム既存ならスキップ
     print("✅ データベース初期化完了")
 
 
@@ -180,9 +186,27 @@ def get_all_tasks(user_id: str) -> list[dict]:
         return [_deserialize_task(row) for row in rows]
 
 
-def mark_task_registered(task_id: int):
+def find_duplicate_task(user_id: str, title: str, due_date: str | None) -> dict | None:
+    """同一ユーザー・タイトル・日付の既存タスクを検索（重複検出用）"""
+    if not due_date:
+        return None
     with get_connection() as conn:
-        conn.execute("UPDATE tasks SET is_registered_to_calendar = 1 WHERE id = ?", (task_id,))
+        row = conn.execute(
+            """SELECT id, title, due_date, is_registered_to_calendar, calendar_event_id
+               FROM tasks
+               WHERE user_id = ? AND title = ? AND due_date = ?
+               LIMIT 1""",
+            (user_id, title, due_date),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def mark_task_registered(task_id: int, calendar_event_id: str | None = None):
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE tasks SET is_registered_to_calendar = 1, calendar_event_id = ? WHERE id = ?",
+            (calendar_event_id, task_id),
+        )
 
 
 def get_tasks_for_reminder(days_before: int = 1) -> list[dict]:

@@ -14,6 +14,10 @@ from database import (
     delete_child,
     update_child_grade,
     get_all_children,
+    save_print,
+    save_tasks,
+    find_duplicate_task,
+    mark_task_registered,
 )
 
 
@@ -145,3 +149,49 @@ class TestChildCRUD:
         assert len(all_children) == 2
         user_ids = {c["user_id"] for c in all_children}
         assert user_ids == {"user1", "user2"}
+
+
+class TestFindDuplicateTask:
+    def test_no_duplicate(self, setup_db):
+        result = find_duplicate_task("user1", "運動会", "2026-05-10")
+        assert result is None
+
+    def test_finds_duplicate(self, setup_db):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        save_tasks(print_id, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        result = find_duplicate_task("user1", "運動会", "2026-05-10")
+        assert result is not None
+        assert result["title"] == "運動会"
+
+    def test_different_user_not_duplicate(self, setup_db):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        save_tasks(print_id, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        result = find_duplicate_task("user2", "運動会", "2026-05-10")
+        assert result is None
+
+    def test_different_date_not_duplicate(self, setup_db):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        save_tasks(print_id, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        result = find_duplicate_task("user1", "運動会", "2026-05-11")
+        assert result is None
+
+    def test_none_due_date_returns_none(self, setup_db):
+        assert find_duplicate_task("user1", "運動会", None) is None
+
+
+class TestMarkTaskRegistered:
+    def test_stores_calendar_event_id(self, setup_db):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        task_ids = save_tasks(print_id, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        mark_task_registered(task_ids[0], "evt_abc123")
+        dup = find_duplicate_task("user1", "運動会", "2026-05-10")
+        assert dup["is_registered_to_calendar"] == 1
+        assert dup["calendar_event_id"] == "evt_abc123"
