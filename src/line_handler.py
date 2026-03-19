@@ -92,17 +92,30 @@ async def _save_and_reply(user_id: str, result: dict):
     )
     tasks = result.get("tasks", [])
     cal_count = 0
+    skipped_count = 0
     if tasks:
-        task_ids = db.save_tasks(print_id, user_id, tasks)
-        if google_calendar.is_calendar_enabled():
-            for task_id, task in zip(task_ids, tasks):
-                event_id = google_calendar.register_task_to_calendar(task)
-                if event_id:
-                    db.mark_task_registered(task_id)
-                    cal_count += 1
+        # 重複タスクを除外してから保存
+        new_tasks = []
+        for task in tasks:
+            dup = db.find_duplicate_task(user_id, task.get("title", ""), task.get("due_date"))
+            if dup:
+                skipped_count += 1
+                logger.info("[Handler] 重複タスクをスキップ: %s (%s)", task.get("title"), task.get("due_date"))
+            else:
+                new_tasks.append(task)
+
+        if new_tasks:
+            task_ids = db.save_tasks(print_id, user_id, new_tasks)
+            if google_calendar.is_calendar_enabled():
+                for task_id, task in zip(task_ids, new_tasks):
+                    event_id = google_calendar.register_task_to_calendar(task)
+                    if event_id:
+                        db.mark_task_registered(task_id, event_id)
+                        cal_count += 1
+        tasks = new_tasks  # フォーマット用に更新
 
     children = db.get_children(user_id)
-    response_text = _format_analysis_result(result, children, cal_count)
+    response_text = _format_analysis_result(result, children, cal_count, skipped_count)
     await push_text(user_id, response_text)
 
 
@@ -354,7 +367,7 @@ async def _show_help(event):
 # 解析結果フォーマット（学年パーソナライズ対応）
 # ============================================================
 
-def _format_analysis_result(result: dict, children: list[dict], cal_count: int = 0) -> str:
+def _format_analysis_result(result: dict, children: list[dict], cal_count: int = 0, skipped_count: int = 0) -> str:
     """解析結果をLINEメッセージ用にフォーマット"""
     lines = []
 
@@ -420,9 +433,12 @@ def _format_analysis_result(result: dict, children: list[dict], cal_count: int =
             lines.append(f"  ・{note}")
 
     # --- フッター ---
-    if tasks:
+    if tasks or skipped_count:
         lines.append(f"\n━━━━━━━━━━━━━━━━━")
-        lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
+        if tasks:
+            lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
+        if skipped_count:
+            lines.append(f"⏭️ {skipped_count}件は既に登録済みのためスキップしました")
         if cal_count > 0:
             lines.append(f"📅 {cal_count}件をGoogleカレンダーに登録しました")
             lines.append(

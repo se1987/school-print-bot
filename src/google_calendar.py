@@ -57,15 +57,35 @@ def _build_service():
     return build("calendar", "v3", credentials=creds)
 
 
+def _find_existing_event(service, title: str, due_date: str) -> str | None:
+    """カレンダー上に同日・同タイトルのイベントが既にあるか検索"""
+    try:
+        events_result = service.events().list(
+            calendarId=CALENDAR_ID,
+            timeMin=f"{due_date}T00:00:00Z",
+            timeMax=f"{due_date}T23:59:59Z",
+            q=title,
+            singleEvents=True,
+            maxResults=10,
+        ).execute()
+        for event in events_result.get("items", []):
+            if event.get("summary") == title:
+                logger.info("[Calendar] 重複イベント検出: %s (%s)", title, due_date)
+                return event.get("id")
+    except HttpError as e:
+        logger.warning("[Calendar] 重複チェックエラー（登録を続行）: %s", e)
+    return None
+
+
 def register_task_to_calendar(task: dict) -> str | None:
     """
-    タスクをGoogleカレンダーに登録する
+    タスクをGoogleカレンダーに登録する（重複チェック付き）
 
     Args:
         task: タスク辞書（title, description, due_date, task_type を含む）
 
     Returns:
-        カレンダーイベントID（成功時）、None（失敗・スキップ時）
+        カレンダーイベントID（成功時・既存時）、None（失敗・スキップ時）
     """
     due_date = task.get("due_date")
     if not due_date:
@@ -76,6 +96,11 @@ def register_task_to_calendar(task: dict) -> str | None:
         return None
 
     title = task.get("title", "学校タスク")
+
+    # カレンダー上の重複チェック
+    existing_id = _find_existing_event(service, title, due_date)
+    if existing_id:
+        return existing_id
     description_parts = []
 
     desc = task.get("description", "")
