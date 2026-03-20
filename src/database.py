@@ -166,7 +166,7 @@ def get_pending_tasks(user_id: str) -> list[dict]:
         rows = conn.execute(
             """SELECT id, title, description, due_date, task_type, target_grades, dismissal_times
                FROM tasks
-               WHERE user_id = ? AND due_date >= date('now')
+               WHERE user_id = ? AND due_date >= date('now', '+9 hours')
                ORDER BY due_date ASC""",
             (user_id,),
         ).fetchall()
@@ -215,7 +215,7 @@ def get_tasks_for_reminder(days_before: int = 1) -> list[dict]:
             """SELECT t.id, t.user_id, t.title, t.description, t.due_date,
                       t.task_type, t.target_grades, t.dismissal_times
                FROM tasks t
-               WHERE t.due_date = date('now', '+' || ? || ' days') AND t.is_reminded = 0
+               WHERE t.due_date = date('now', '+9 hours', '+' || ? || ' days') AND t.is_reminded = 0
                ORDER BY t.due_date ASC""",
             (days_before,),
         ).fetchall()
