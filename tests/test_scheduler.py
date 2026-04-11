@@ -4,7 +4,16 @@ scheduler.py のテスト
 - _build_task_section / _build_personalized_reminder / _build_generic_reminder: リマインドメッセージ構築
 """
 
-from scheduler import _advance_grade, _build_task_section, _build_personalized_reminder, _build_generic_reminder
+from datetime import timedelta
+
+from scheduler import (
+    _advance_grade,
+    _build_generic_reminder,
+    _build_personalized_reminder,
+    _build_task_section,
+    _format_date_label,
+    _jst_today,
+)
 
 
 class TestAdvanceGrade:
@@ -130,3 +139,36 @@ class TestBuildReminder:
     def test_generic_empty(self):
         msg = _build_generic_reminder([], [])
         assert "合計 0 件" in msg
+
+    def test_personalized_includes_today_and_tomorrow_dates(self):
+        today = _jst_today()
+        tomorrow = today + timedelta(days=1)
+        children = [{"name": "たろう", "grade": "1年"}]
+        msg = _build_personalized_reminder(
+            [self._make_task(title="今日のイベント")],
+            [self._make_task(title="明日のイベント")],
+            children,
+        )
+        assert _format_date_label(today) in msg
+        assert _format_date_label(tomorrow) in msg
+
+    def test_generic_includes_today_and_tomorrow_dates(self):
+        today = _jst_today()
+        tomorrow = today + timedelta(days=1)
+        msg = _build_generic_reminder(
+            [self._make_task(title="持ち物確認")],
+            [self._make_task(title="遠足")],
+        )
+        assert _format_date_label(today) in msg
+        assert _format_date_label(tomorrow) in msg
+
+
+class TestFormatDateLabel:
+    def test_weekday_japanese(self):
+        from datetime import date
+        # 2026-04-11 は土曜日
+        assert _format_date_label(date(2026, 4, 11)) == "4月11日（土）"
+        # 2026-04-12 は日曜日
+        assert _format_date_label(date(2026, 4, 12)) == "4月12日（日）"
+        # 2026-01-01 は木曜日
+        assert _format_date_label(date(2026, 1, 1)) == "1月1日（木）"
