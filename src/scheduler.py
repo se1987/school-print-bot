@@ -4,6 +4,7 @@
 """
 
 import logging
+from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -13,6 +14,19 @@ import database as db
 logger = logging.getLogger(__name__)
 
 scheduler = AsyncIOScheduler()
+
+JST = timezone(timedelta(hours=9))
+_WEEKDAYS_JA = ["月", "火", "水", "木", "金", "土", "日"]
+
+
+def _jst_today() -> date:
+    """JSTベースの今日の日付を返す"""
+    return datetime.now(JST).date()
+
+
+def _format_date_label(d: date) -> str:
+    """'4月11日（土）' 形式で日付をフォーマット"""
+    return f"{d.month}月{d.day}日（{_WEEKDAYS_JA[d.weekday()]}）"
 
 
 async def send_reminder_for_user(user_id: str) -> bool:
@@ -137,8 +151,13 @@ def _build_personalized_reminder(today_tasks: list[dict], tomorrow_tasks: list[d
     """子どもの学年に合わせたリマインドメッセージを構築"""
     lines = ["🔔 おはようございます！"]
 
-    today_section, today_count = _build_task_section(today_tasks, children, "📌 今日の予定・タスク")
-    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, children, "📅 明日の予定・タスク")
+    today = _jst_today()
+    tomorrow = today + timedelta(days=1)
+    today_label = f"📌 今日の予定・タスク {_format_date_label(today)}"
+    tomorrow_label = f"📅 明日の予定・タスク {_format_date_label(tomorrow)}"
+
+    today_section, today_count = _build_task_section(today_tasks, children, today_label)
+    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, children, tomorrow_label)
     total_displayed = today_count + tomorrow_count
 
     if total_displayed == 0:
@@ -155,8 +174,13 @@ def _build_generic_reminder(today_tasks: list[dict], tomorrow_tasks: list[dict])
     """子ども未登録時の汎用リマインドメッセージ"""
     lines = ["🔔 おはようございます！"]
 
-    today_section, today_count = _build_task_section(today_tasks, None, "📌 今日の予定・タスク")
-    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, None, "📅 明日の予定・タスク")
+    today = _jst_today()
+    tomorrow = today + timedelta(days=1)
+    today_label = f"📌 今日の予定・タスク {_format_date_label(today)}"
+    tomorrow_label = f"📅 明日の予定・タスク {_format_date_label(tomorrow)}"
+
+    today_section, today_count = _build_task_section(today_tasks, None, today_label)
+    tomorrow_section, tomorrow_count = _build_task_section(tomorrow_tasks, None, tomorrow_label)
     lines.extend(today_section)
     lines.extend(tomorrow_section)
 
