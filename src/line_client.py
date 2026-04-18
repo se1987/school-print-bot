@@ -14,6 +14,9 @@ from linebot.v3.messaging import (
     ReplyMessageRequest,
     PushMessageRequest,
     TextMessage,
+    QuickReply,
+    QuickReplyItem,
+    PostbackAction,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,6 +62,33 @@ async def push_text(user_id: str, text: str) -> None:
         )
     except Exception as e:
         logger.error("[LINE] Push失敗: %s", e)
+        raise
+
+
+async def push_text_with_quick_reply(
+    user_id: str, text: str, items: list[tuple[str, str]]
+) -> None:
+    """Quick Reply ボタン付きのプッシュメッセージを送信
+
+    Args:
+        items: (ラベル, postbackデータ) のタプル一覧
+    """
+    api = _get_line_api()
+    quick_reply = QuickReply(
+        items=[
+            QuickReplyItem(action=PostbackAction(label=label, data=data, display_text=label))
+            for label, data in items
+        ]
+    )
+    try:
+        await api.push_message(
+            PushMessageRequest(
+                to=user_id,
+                messages=[TextMessage(text=text, quick_reply=quick_reply)],
+            )
+        )
+    except Exception as e:
+        logger.error("[LINE] Push(QuickReply)失敗: %s", e)
         raise
 
 

@@ -8,6 +8,7 @@ import re
 
 from linebot.v3.webhooks import (
     MessageEvent,
+    PostbackEvent,
     TextMessageContent,
     ImageMessageContent,
     FileMessageContent,
@@ -16,7 +17,7 @@ from linebot.v3.webhooks import (
 import database as db
 import gemini_client
 import google_calendar
-from line_client import reply_text, push_text, download_content
+from line_client import reply_text, push_text, push_text_with_quick_reply, download_content
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,24 @@ async def handle_message(event: MessageEvent):
         await handle_file(event)
     elif isinstance(event.message, TextMessageContent):
         await handle_text(event)
+
+
+async def handle_postback(event: PostbackEvent):
+    """Quick Reply ボタン押下などのPostbackを処理する"""
+    user_id = event.source.user_id
+    data = event.postback.data or ""
+    params = dict(p.split("=", 1) for p in data.split("&") if "=" in p)
+    action = params.get("action")
+
+    if action in ("cal_register", "cal_skip"):
+        try:
+            print_id = int(params.get("print_id", "0"))
+        except ValueError:
+            print_id = 0
+        await _handle_calendar_decision(event, user_id, action, print_id)
+        return
+
+    logger.info("[Handler] 未知のpostback: %s", data)
 
 
 # ============================================================
@@ -93,9 +112,10 @@ async def _save_and_reply(user_id: str, result: dict):
     tasks = result.get("tasks", [])
     cal_count = 0
     skipped_count = 0
+    calendar_mode = db.get_calendar_mode(user_id)
+    new_tasks: list[dict] = []
     if tasks:
         # 重複タスクを除外してから保存
-        new_tasks = []
         for task in tasks:
             dup = db.find_duplicate_task(user_id, task.get("title", ""), task.get("due_date"))
             if dup:
@@ -106,7 +126,7 @@ async def _save_and_reply(user_id: str, result: dict):
 
         if new_tasks:
             task_ids = db.save_tasks(print_id, user_id, new_tasks)
-            if google_calendar.is_calendar_enabled():
+            if calendar_mode == "auto" and google_calendar.is_calendar_enabled():
                 for task_id, task in zip(task_ids, new_tasks):
                     event_id = google_calendar.register_task_to_calendar(task)
                     if event_id:
@@ -114,9 +134,29 @@ async def _save_and_reply(user_id: str, result: dict):
                         cal_count += 1
         tasks = new_tasks  # フォーマット用に更新
 
+    # 保留モード & カレンダー連携済み & 新規タスクありの場合は確認ボタン付きで送る
+    pending_confirm = (
+        calendar_mode == "ask"
+        and google_calendar.is_calendar_enabled()
+        and bool(new_tasks)
+    )
+
     children = db.get_children(user_id)
-    response_text = _format_analysis_result(result, children, cal_count, skipped_count)
-    await push_text(user_id, response_text)
+    response_text = _format_analysis_result(
+        result, children, cal_count, skipped_count, pending_confirm=pending_confirm
+    )
+
+    if pending_confirm:
+        await push_text_with_quick_reply(
+            user_id,
+            response_text,
+            [
+                ("カレンダーに登録", f"action=cal_register&print_id={print_id}"),
+                ("登録しない", f"action=cal_skip&print_id={print_id}"),
+            ],
+        )
+    else:
+        await push_text(user_id, response_text)
 
 
 # ============================================================
@@ -175,12 +215,109 @@ async def handle_text(event: MessageEvent):
         await _test_reminder(event, user_id)
         return
 
+    if text in _CALENDAR_MODE_COMMANDS:
+        await _set_calendar_mode(event, user_id, _CALENDAR_MODE_COMMANDS[text])
+        return
+
+    if text in ("カレンダー設定", "カレンダー"):
+        await _show_calendar_mode(event, user_id)
+        return
+
     if text in ("ヘルプ", "使い方"):
         await _show_help(event)
         return
 
     # それ以外 → キーワード検索
     await _search_prints(event, user_id, text)
+
+
+# ============================================================
+# カレンダー設定コマンド
+# ============================================================
+
+_CALENDAR_MODE_COMMANDS = {
+    "カレンダー自動登録オン": "auto",
+    "カレンダー自動登録オフ": "off",
+    "カレンダー保留": "ask",
+}
+
+_CALENDAR_MODE_LABELS = {
+    "auto": "自動登録オン（プリント解析と同時に登録）",
+    "off": "自動登録オフ（カレンダーに登録しない）",
+    "ask": "保留モード（毎回ボタンで確認）",
+}
+
+
+async def _set_calendar_mode(event, user_id: str, mode: str):
+    if not google_calendar.is_calendar_enabled():
+        await reply_text(
+            event.reply_token,
+            "⚠️ Googleカレンダー連携が未設定のため、この設定は有効になりません。\n"
+            "管理者にカレンダー連携の設定を依頼してください。",
+        )
+        return
+    db.set_calendar_mode(user_id, mode)
+    await reply_text(
+        event.reply_token,
+        f"✅ カレンダー設定を更新しました\n現在の設定: {_CALENDAR_MODE_LABELS[mode]}",
+    )
+
+
+async def _show_calendar_mode(event, user_id: str):
+    if not google_calendar.is_calendar_enabled():
+        await reply_text(
+            event.reply_token,
+            "📅 Googleカレンダー連携は未設定です。",
+        )
+        return
+    mode = db.get_calendar_mode(user_id)
+    await reply_text(
+        event.reply_token,
+        "📅 カレンダー設定\n"
+        f"現在: {_CALENDAR_MODE_LABELS[mode]}\n\n"
+        "切替コマンド:\n"
+        "・カレンダー自動登録オン\n"
+        "・カレンダー自動登録オフ\n"
+        "・カレンダー保留",
+    )
+
+
+async def _handle_calendar_decision(event, user_id: str, action: str, print_id: int):
+    """保留モードでのカレンダー登録ボタン押下を処理"""
+    if not print_id:
+        await reply_text(event.reply_token, "⚠️ 対象プリントの情報が取得できませんでした。")
+        return
+
+    if action == "cal_skip":
+        await reply_text(
+            event.reply_token,
+            "✅ カレンダーへの登録をスキップしました。\n（タスク一覧には保存されています）",
+        )
+        return
+
+    # cal_register
+    if not google_calendar.is_calendar_enabled():
+        await reply_text(event.reply_token, "⚠️ カレンダー連携が無効化されています。")
+        return
+
+    pending = db.get_unregistered_tasks_for_print(print_id, user_id)
+    if not pending:
+        await reply_text(event.reply_token, "ℹ️ 登録待ちのタスクはありません。")
+        return
+
+    await reply_text(event.reply_token, f"📅 {len(pending)}件をカレンダーに登録中...")
+
+    cal_count = 0
+    for task in pending:
+        event_id = google_calendar.register_task_to_calendar(task)
+        if event_id:
+            db.mark_task_registered(task["id"], event_id)
+            cal_count += 1
+
+    msg = f"✅ {cal_count}件をGoogleカレンダーに登録しました"
+    if cal_count < len(pending):
+        msg += f"\n（{len(pending) - cal_count}件は登録に失敗しました）"
+    await push_text(user_id, msg)
 
 
 # ============================================================
@@ -355,6 +492,11 @@ async def _show_help(event):
         "  例: 子ども登録 じろう 中学1年\n\n"
         "👨‍👩‍👧‍👦 「子ども一覧」\n"
         "→ 登録済みの子どもを確認\n\n"
+        "📅 「カレンダー設定」\n"
+        "→ Googleカレンダーの登録モードを表示\n"
+        "  ・カレンダー自動登録オン（自動）\n"
+        "  ・カレンダー自動登録オフ（無効）\n"
+        "  ・カレンダー保留（毎回確認）\n\n"
         "❓ 「ヘルプ」\n"
         "→ この使い方を表示\n\n"
         "━━━━━━━━━━━━━━━━━\n"
@@ -367,7 +509,13 @@ async def _show_help(event):
 # 解析結果フォーマット（学年パーソナライズ対応）
 # ============================================================
 
-def _format_analysis_result(result: dict, children: list[dict], cal_count: int = 0, skipped_count: int = 0) -> str:
+def _format_analysis_result(
+    result: dict,
+    children: list[dict],
+    cal_count: int = 0,
+    skipped_count: int = 0,
+    pending_confirm: bool = False,
+) -> str:
     """解析結果をLINEメッセージ用にフォーマット"""
     lines = []
 
@@ -445,6 +593,9 @@ def _format_analysis_result(result: dict, children: list[dict], cal_count: int =
                 "🌳 TimeTreeでも確認できます\n"
                 "   設定方法: https://support.timetreeapp.com/hc/ja/articles/360000629341"
             )
+        if pending_confirm:
+            lines.append("📅 Googleカレンダーに登録しますか？")
+            lines.append("下のボタンから選択してください 👇")
 
     if not children:
         lines.append("\n💡 「子ども登録 名前 ◯年」で\n   学年に合った下校時刻を表示できます")

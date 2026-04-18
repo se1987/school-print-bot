@@ -62,7 +62,7 @@ from fastapi import FastAPI, Request, HTTPException  # noqa: E402
 
 from linebot.v3.webhook import WebhookParser  # noqa: E402
 from linebot.v3.exceptions import InvalidSignatureError  # noqa: E402
-from linebot.v3.webhooks import MessageEvent  # noqa: E402
+from linebot.v3.webhooks import MessageEvent, PostbackEvent  # noqa: E402
 
 import database as db  # noqa: E402
 import line_handler  # noqa: E402
@@ -125,6 +125,8 @@ async def callback(request: Request):
     for event in events:
         if isinstance(event, MessageEvent):
             await line_handler.handle_message(event)
+        elif isinstance(event, PostbackEvent):
+            await line_handler.handle_postback(event)
 
     return {"status": "ok"}
 
