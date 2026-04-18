@@ -47,10 +47,16 @@ def init_db():
                 grade TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id TEXT PRIMARY KEY,
+                calendar_mode TEXT NOT NULL DEFAULT 'auto',
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE INDEX IF NOT EXISTS idx_prints_user ON prints(user_id);
             CREATE INDEX IF NOT EXISTS idx_tasks_user ON tasks(user_id);
             CREATE INDEX IF NOT EXISTS idx_tasks_due ON tasks(due_date);
             CREATE INDEX IF NOT EXISTS idx_children_user ON children(user_id);
+            CREATE INDEX IF NOT EXISTS idx_tasks_print ON tasks(print_id);
         """)
         # 既存DBにカラムを追加（マイグレーション）
         try:
@@ -206,6 +212,47 @@ def mark_task_registered(task_id: int, calendar_event_id: str | None = None):
         conn.execute(
             "UPDATE tasks SET is_registered_to_calendar = 1, calendar_event_id = ? WHERE id = ?",
             (calendar_event_id, task_id),
+        )
+
+
+def get_unregistered_tasks_for_print(print_id: int, user_id: str) -> list[dict]:
+    """指定プリントのうちカレンダー未登録のタスクを返す（保留モードの確認用）"""
+    with get_connection() as conn:
+        rows = conn.execute(
+            """SELECT id, title, description, due_date, task_type, target_grades, dismissal_times
+               FROM tasks
+               WHERE print_id = ? AND user_id = ? AND is_registered_to_calendar = 0""",
+            (print_id, user_id),
+        ).fetchall()
+        return [_deserialize_task(row) for row in rows]
+
+
+# === ユーザー設定 ===
+
+VALID_CALENDAR_MODES = ("auto", "off", "ask")
+
+
+def get_calendar_mode(user_id: str) -> str:
+    """カレンダー登録モード: 'auto'（自動）, 'off'（無効）, 'ask'（保留・都度確認）"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT calendar_mode FROM user_settings WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return row["calendar_mode"] if row else "auto"
+
+
+def set_calendar_mode(user_id: str, mode: str) -> None:
+    if mode not in VALID_CALENDAR_MODES:
+        raise ValueError(f"invalid calendar_mode: {mode}")
+    with get_connection() as conn:
+        conn.execute(
+            """INSERT INTO user_settings (user_id, calendar_mode)
+               VALUES (?, ?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 calendar_mode = excluded.calendar_mode,
+                 updated_at = CURRENT_TIMESTAMP""",
+            (user_id, mode),
         )
 
 
