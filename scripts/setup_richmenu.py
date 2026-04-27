@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import os
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -31,7 +33,6 @@ from linebot.v3.messaging import (
     Configuration,
     MessageAction,
     MessagingApi,
-    MessagingApiBlob,
     RichMenuArea,
     RichMenuBounds,
     RichMenuRequest,
@@ -163,6 +164,31 @@ def cleanup_existing(api: MessagingApi) -> None:
             api.delete_rich_menu(menu.rich_menu_id)
 
 
+def upload_rich_menu_image(rich_menu_id: str, image_path: Path, token: str) -> None:
+    """画像アップロードはSDK(v3.14.3)のバイナリ送信が一部環境で不具合のため、
+    urllibで直接 LINE Data API に POST する"""
+    url = f"https://api-data.line.me/v2/bot/richmenu/{rich_menu_id}/content"
+    with open(image_path, "rb") as f:
+        data = f.read()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "image/png",
+            "Content-Length": str(len(data)),
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            if resp.status not in (200, 201):
+                raise RuntimeError(f"画像アップロード失敗: status={resp.status}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"画像アップロード失敗: {e.code} {e.reason} / {body}") from e
+
+
 def main() -> None:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
     if not token:
@@ -174,7 +200,6 @@ def main() -> None:
     config = Configuration(access_token=token)
     with ApiClient(config) as client:
         api = MessagingApi(client)
-        blob = MessagingApiBlob(client)
 
         cleanup_existing(api)
 
@@ -189,12 +214,7 @@ def main() -> None:
         rich_menu_id = result.rich_menu_id
         print(f"✅ リッチメニュー作成: {rich_menu_id}")
 
-        with open(image_path, "rb") as f:
-            blob.set_rich_menu_image(
-                rich_menu_id=rich_menu_id,
-                body=f.read(),
-                _content_type="image/png",
-            )
+        upload_rich_menu_image(rich_menu_id, image_path, token)
         print("✅ 画像アップロード完了")
 
         api.set_default_rich_menu(rich_menu_id)
