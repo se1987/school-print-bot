@@ -17,6 +17,8 @@ LINEリッチメニュー登録スクリプト（ワンショット）
 同名の旧メニューは自動で削除されます。
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from pathlib import Path
