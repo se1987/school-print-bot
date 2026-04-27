@@ -162,8 +162,8 @@ def save_tasks(print_id: int, user_id: str, tasks: list[dict]) -> list[int]:
 
 def _deserialize_task(row) -> dict:
     d = dict(row)
-    d["target_grades"] = json.loads(d.get("target_grades") or '["全学年"]')
-    d["dismissal_times"] = json.loads(d.get("dismissal_times") or "[]")
+    d["target_grades"] = json.loads(d.get("target_grades") or '["全学年"]') or ["全学年"]
+    d["dismissal_times"] = json.loads(d.get("dismissal_times") or "[]") or []
     return d
 
 
