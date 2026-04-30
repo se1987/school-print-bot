@@ -74,12 +74,7 @@ async def push_text_with_quick_reply(
         items: (ラベル, postbackデータ) のタプル一覧
     """
     api = _get_line_api()
-    quick_reply = QuickReply(
-        items=[
-            QuickReplyItem(action=PostbackAction(label=label, data=data, display_text=label))
-            for label, data in items
-        ]
-    )
+    quick_reply = _build_quick_reply(items)
     try:
         await api.push_message(
             PushMessageRequest(
@@ -90,6 +85,37 @@ async def push_text_with_quick_reply(
     except Exception as e:
         logger.error("[LINE] Push(QuickReply)失敗: %s", e)
         raise
+
+
+async def reply_text_with_quick_reply(
+    reply_token: str, text: str, items: list[tuple[str, str]]
+) -> None:
+    """Quick Reply ボタン付きのリプライメッセージを送信
+
+    Args:
+        items: (ラベル, postbackデータ) のタプル一覧
+    """
+    api = _get_line_api()
+    quick_reply = _build_quick_reply(items)
+    try:
+        await api.reply_message(
+            ReplyMessageRequest(
+                reply_token=reply_token,
+                messages=[TextMessage(text=text, quick_reply=quick_reply)],
+            )
+        )
+    except Exception as e:
+        logger.error("[LINE] Reply(QuickReply)失敗: %s", e)
+        raise
+
+
+def _build_quick_reply(items: list[tuple[str, str]]) -> QuickReply:
+    return QuickReply(
+        items=[
+            QuickReplyItem(action=PostbackAction(label=label, data=data, display_text=label))
+            for label, data in items
+        ]
+    )
 
 
 async def download_content(message_id: str) -> bytes:

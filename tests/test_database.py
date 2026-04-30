@@ -18,6 +18,8 @@ from database import (
     save_tasks,
     find_duplicate_task,
     mark_task_registered,
+    update_task_print_id,
+    get_unregistered_tasks_for_print,
 )
 
 
@@ -195,3 +197,46 @@ class TestMarkTaskRegistered:
         dup = find_duplicate_task("user1", "運動会", "2026-05-10")
         assert dup["is_registered_to_calendar"] == 1
         assert dup["calendar_event_id"] == "evt_abc123"
+
+
+class TestFindDuplicateTaskFields:
+    """find_duplicate_task はカレンダー再登録に必要なフィールドを返す"""
+
+    def test_returns_full_task_payload(self, setup_db):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        save_tasks(print_id, "user1", [{
+            "title": "運動会",
+            "description": "雨天順延",
+            "due_date": "2026-05-10",
+            "task_type": "event",
+            "target_grades": ["1年", "2年"],
+            "dismissal_times": [{"grades": "1〜2年", "time": "13:00"}],
+        }])
+        dup = find_duplicate_task("user1", "運動会", "2026-05-10")
+        assert dup is not None
+        assert dup["id"]
+        assert dup["print_id"] == print_id
+        assert dup["description"] == "雨天順延"
+        assert dup["task_type"] == "event"
+        assert dup["target_grades"] == ["1年", "2年"]
+        assert dup["dismissal_times"] == [{"grades": "1〜2年", "time": "13:00"}]
+        assert dup["is_registered_to_calendar"] == 0
+
+
+class TestUpdateTaskPrintId:
+    def test_repoints_task_to_new_print(self, setup_db):
+        print_id_1 = save_print("user1", "1回目", "")
+        print_id_2 = save_print("user1", "2回目", "")
+        task_ids = save_tasks(print_id_1, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        # 古いプリント側で取得できる
+        before = get_unregistered_tasks_for_print(print_id_1, "user1")
+        assert len(before) == 1
+        # 付け替え
+        update_task_print_id(task_ids[0], print_id_2)
+        # 古いプリントには存在しなくなり、新しいプリント側で取得できる
+        assert get_unregistered_tasks_for_print(print_id_1, "user1") == []
+        after = get_unregistered_tasks_for_print(print_id_2, "user1")
+        assert len(after) == 1
+        assert after[0]["title"] == "運動会"

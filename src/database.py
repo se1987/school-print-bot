@@ -193,18 +193,23 @@ def get_all_tasks(user_id: str) -> list[dict]:
 
 
 def find_duplicate_task(user_id: str, title: str, due_date: str | None) -> dict | None:
-    """同一ユーザー・タイトル・日付の既存タスクを検索（重複検出用）"""
+    """同一ユーザー・タイトル・日付の既存タスクを検索（重複検出用）
+
+    カレンダー再登録判定や ask モードでの確認ボタン対応に必要なフィールドも返す。
+    """
     if not due_date:
         return None
     with get_connection() as conn:
         row = conn.execute(
-            """SELECT id, title, due_date, is_registered_to_calendar, calendar_event_id
+            """SELECT id, print_id, title, description, due_date, task_type,
+                      target_grades, dismissal_times,
+                      is_registered_to_calendar, calendar_event_id
                FROM tasks
                WHERE user_id = ? AND title = ? AND due_date = ?
                LIMIT 1""",
             (user_id, title, due_date),
         ).fetchone()
-        return dict(row) if row else None
+        return _deserialize_task(row) if row else None
 
 
 def mark_task_registered(task_id: int, calendar_event_id: str | None = None):
@@ -212,6 +217,15 @@ def mark_task_registered(task_id: int, calendar_event_id: str | None = None):
         conn.execute(
             "UPDATE tasks SET is_registered_to_calendar = 1, calendar_event_id = ? WHERE id = ?",
             (calendar_event_id, task_id),
+        )
+
+
+def update_task_print_id(task_id: int, new_print_id: int) -> None:
+    """既存タスクを別プリントに紐付け直す（再アップロード時に ask フローへ載せるため）"""
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE tasks SET print_id = ? WHERE id = ?",
+            (new_print_id, task_id),
         )
 
 
