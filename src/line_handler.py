@@ -17,7 +17,13 @@ from linebot.v3.webhooks import (
 import database as db
 import gemini_client
 import google_calendar
-from line_client import reply_text, push_text, push_text_with_quick_reply, download_content
+from line_client import (
+    reply_text,
+    reply_text_with_quick_reply,
+    push_text,
+    push_text_with_quick_reply,
+    download_content,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,14 @@ async def handle_postback(event: PostbackEvent):
         except ValueError:
             print_id = 0
         await _handle_calendar_decision(event, user_id, action, print_id)
+        return
+
+    if action == "cal_mode":
+        mode = params.get("value", "")
+        if mode in db.VALID_CALENDAR_MODES:
+            await _set_calendar_mode(event, user_id, mode)
+        else:
+            await reply_text(event.reply_token, "⚠️ 不明なカレンダーモードです。")
         return
 
     logger.info("[Handler] 未知のpostback: %s", data)
@@ -112,21 +126,49 @@ async def _save_and_reply(user_id: str, result: dict):
     tasks = result.get("tasks", [])
     cal_count = 0
     skipped_count = 0
+    re_registered_count = 0
     calendar_mode = db.get_calendar_mode(user_id)
+    calendar_enabled = google_calendar.is_calendar_enabled()
     new_tasks: list[dict] = []
+    pending_existing_ids: list[int] = []  # ask モード時に既存未登録タスクを再付け替えする
     if tasks:
-        # 重複タスクを除外してから保存
+        # 重複タスクは除外。ただし「既存タスクがカレンダー未登録」なら救済する
         for task in tasks:
             dup = db.find_duplicate_task(user_id, task.get("title", ""), task.get("due_date"))
-            if dup:
-                skipped_count += 1
-                logger.info("[Handler] 重複タスクをスキップ: %s (%s)", task.get("title"), task.get("due_date"))
-            else:
+            if not dup:
                 new_tasks.append(task)
+                continue
+
+            already_registered = bool(dup.get("is_registered_to_calendar"))
+            if already_registered or calendar_mode == "off" or not calendar_enabled:
+                skipped_count += 1
+                logger.info(
+                    "[Handler] 重複タスクをスキップ: %s (%s)",
+                    task.get("title"), task.get("due_date"),
+                )
+                continue
+
+            # 既存タスクがカレンダー未登録 → 設定に応じて再登録チャンスを与える
+            if calendar_mode == "auto":
+                event_id = google_calendar.register_task_to_calendar(dup)
+                if event_id:
+                    db.mark_task_registered(dup["id"], event_id)
+                    re_registered_count += 1
+                    logger.info(
+                        "[Handler] 既存タスクをカレンダーに再登録: %s (%s)",
+                        dup.get("title"), dup.get("due_date"),
+                    )
+                else:
+                    skipped_count += 1
+            else:  # calendar_mode == "ask"
+                # ask フローは print_id 単位で未登録タスクを取得するため、
+                # 既存タスクを今回のプリントに付け替えて確認ボタンの対象にする
+                db.update_task_print_id(dup["id"], print_id)
+                pending_existing_ids.append(dup["id"])
 
         if new_tasks:
             task_ids = db.save_tasks(print_id, user_id, new_tasks)
-            if calendar_mode == "auto" and google_calendar.is_calendar_enabled():
+            if calendar_mode == "auto" and calendar_enabled:
                 for task_id, task in zip(task_ids, new_tasks):
                     event_id = google_calendar.register_task_to_calendar(task)
                     if event_id:
@@ -134,16 +176,19 @@ async def _save_and_reply(user_id: str, result: dict):
                         cal_count += 1
         tasks = new_tasks  # フォーマット用に更新
 
-    # 保留モード & カレンダー連携済み & 新規タスクありの場合は確認ボタン付きで送る
+    # 保留モード & カレンダー連携済み & 登録候補ありの場合は確認ボタン付きで送る
     pending_confirm = (
         calendar_mode == "ask"
-        and google_calendar.is_calendar_enabled()
-        and bool(new_tasks)
+        and calendar_enabled
+        and (bool(new_tasks) or bool(pending_existing_ids))
     )
 
     children = db.get_children(user_id)
     response_text = _format_analysis_result(
-        result, children, cal_count, skipped_count, pending_confirm=pending_confirm
+        result, children, cal_count, skipped_count,
+        re_registered_count=re_registered_count,
+        pending_existing_count=len(pending_existing_ids),
+        pending_confirm=pending_confirm,
     )
 
     if pending_confirm:
@@ -271,14 +316,19 @@ async def _show_calendar_mode(event, user_id: str):
         )
         return
     mode = db.get_calendar_mode(user_id)
-    await reply_text(
-        event.reply_token,
+    text = (
         "📅 カレンダー設定\n"
         f"現在: {_CALENDAR_MODE_LABELS[mode]}\n\n"
-        "切替コマンド:\n"
-        "・カレンダー自動登録オン\n"
-        "・カレンダー自動登録オフ\n"
-        "・カレンダー保留",
+        "下のボタンから切り替えできます 👇"
+    )
+    await reply_text_with_quick_reply(
+        event.reply_token,
+        text,
+        [
+            ("自動登録オン", "action=cal_mode&value=auto"),
+            ("自動登録オフ", "action=cal_mode&value=off"),
+            ("保留（毎回確認）", "action=cal_mode&value=ask"),
+        ],
     )
 
 
@@ -493,10 +543,10 @@ async def _show_help(event):
         "👨‍👩‍👧‍👦 「子ども一覧」\n"
         "→ 登録済みの子どもを確認\n\n"
         "📅 「カレンダー設定」\n"
-        "→ Googleカレンダーの登録モードを表示\n"
-        "  ・カレンダー自動登録オン（自動）\n"
-        "  ・カレンダー自動登録オフ（無効）\n"
-        "  ・カレンダー保留（毎回確認）\n\n"
+        "→ Googleカレンダー登録モードをボタンで切替\n"
+        "  ・自動登録オン（自動で登録）\n"
+        "  ・自動登録オフ（登録しない）\n"
+        "  ・保留（毎回確認）\n\n"
         "❓ 「ヘルプ」\n"
         "→ この使い方を表示\n\n"
         "━━━━━━━━━━━━━━━━━\n"
@@ -514,6 +564,8 @@ def _format_analysis_result(
     children: list[dict],
     cal_count: int = 0,
     skipped_count: int = 0,
+    re_registered_count: int = 0,
+    pending_existing_count: int = 0,
     pending_confirm: bool = False,
 ) -> str:
     """解析結果をLINEメッセージ用にフォーマット"""
@@ -581,20 +633,33 @@ def _format_analysis_result(
             lines.append(f"  ・{note}")
 
     # --- フッター ---
-    if tasks or skipped_count:
+    has_footer_info = tasks or skipped_count or re_registered_count or pending_existing_count
+    if has_footer_info:
         lines.append(f"\n━━━━━━━━━━━━━━━━━")
         if tasks:
             lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
         if skipped_count:
             lines.append(f"⏭️ {skipped_count}件は既に登録済みのためスキップしました")
-        if cal_count > 0:
-            lines.append(f"📅 {cal_count}件をGoogleカレンダーに登録しました")
+        if cal_count > 0 or re_registered_count > 0:
+            total_cal = cal_count + re_registered_count
+            extra = f"（うち既存タスクの追加登録 {re_registered_count}件）" if re_registered_count else ""
+            lines.append(f"📅 {total_cal}件をGoogleカレンダーに登録しました{extra}")
             lines.append(
                 "🌳 TimeTreeでも確認できます\n"
                 "   設定方法: https://support.timetreeapp.com/hc/ja/articles/360000629341"
             )
         if pending_confirm:
-            lines.append("📅 Googleカレンダーに登録しますか？")
+            if pending_existing_count and not tasks:
+                lines.append(
+                    f"📅 既存の未登録タスク {pending_existing_count}件をGoogleカレンダーに登録しますか？"
+                )
+            elif pending_existing_count:
+                lines.append(
+                    f"📅 新規タスクと既存の未登録 {pending_existing_count}件を"
+                    "Googleカレンダーに登録しますか？"
+                )
+            else:
+                lines.append("📅 Googleカレンダーに登録しますか？")
             lines.append("下のボタンから選択してください 👇")
 
     if not children:
