@@ -3,6 +3,7 @@ Gemini API クライアント
 PDF/画像からテキスト抽出＋タスク・日付を構造化データとして返す
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -100,7 +101,10 @@ async def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> di
     prompt = SYSTEM_PROMPT.replace("{today}", today)
 
     try:
-        response = client.models.generate_content(
+        # generate_content は同期(ブロッキング)呼び出しなので、別スレッドに逃がして
+        # イベントループをブロックしないようにする（他リクエストの巻き添え499を防ぐ）
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model=MODEL_NAME,
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
@@ -125,7 +129,10 @@ async def analyze_pdf(pdf_bytes: bytes) -> dict:
     prompt = SYSTEM_PROMPT.replace("{today}", today)
 
     try:
-        response = client.models.generate_content(
+        # generate_content は同期(ブロッキング)呼び出しなので、別スレッドに逃がして
+        # イベントループをブロックしないようにする（他リクエストの巻き添え499を防ぐ）
+        response = await asyncio.to_thread(
+            client.models.generate_content,
             model=MODEL_NAME,
             contents=[
                 types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),

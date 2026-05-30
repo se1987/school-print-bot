@@ -5,6 +5,7 @@ FastAPI + LINE Messaging API + Gemini API
 プリントのPDF/画像からタスクを自動抽出し、カレンダー登録・リマインドを行う
 """
 
+import asyncio
 import logging
 import os
 import sys
@@ -95,6 +96,9 @@ app = FastAPI(
 # LINE Webhook パーサー
 parser = WebhookParser(os.getenv("LINE_CHANNEL_SECRET"))
 
+# バックグラウンドタスクの参照を保持する（保持しないとGCで途中破棄される恐れがある）
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ============================================================
 # エンドポイント
@@ -106,11 +110,26 @@ async def root():
     return {"status": "ok", "message": "学校プリント管理Bot is running!"}
 
 
+async def _process_event(event):
+    """1イベントを処理する。バックグラウンドタスクとして実行され、例外はログのみ"""
+    try:
+        if isinstance(event, MessageEvent):
+            await line_handler.handle_message(event)
+        elif isinstance(event, PostbackEvent):
+            await line_handler.handle_postback(event)
+    except Exception:
+        logger.exception("[Callback] イベント処理中に未捕捉の例外が発生しました")
+
+
 @app.post("/callback")
 async def callback(request: Request):
     """
     LINE Webhook エンドポイント
     LINEからのイベント（メッセージ等）を受け取って処理する
+
+    Gemini解析などの重い処理はバックグラウンドで実行し、LINEには即座に
+    200を返す。これをしないと応答がLINEのタイムアウトを超え、接続が切られて
+    499（Client Closed Request）が記録される＋Webhookが再送されてしまう。
     """
     # リクエストの署名検証
     signature = request.headers.get("X-Line-Signature", "")
@@ -121,12 +140,11 @@ async def callback(request: Request):
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    # イベント処理（非同期）
+    # 重い処理を待たずにバックグラウンドへ流し、即座に200を返す
     for event in events:
-        if isinstance(event, MessageEvent):
-            await line_handler.handle_message(event)
-        elif isinstance(event, PostbackEvent):
-            await line_handler.handle_postback(event)
+        task = asyncio.create_task(_process_event(event))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     return {"status": "ok"}
 
