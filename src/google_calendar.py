@@ -11,6 +11,7 @@ import json
 import logging
 import os
 
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
@@ -44,7 +45,21 @@ def _get_credentials() -> Credentials | None:
     )
 
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError as e:
+            # invalid_grant など。リフレッシュトークンが失効・取り消し済み。
+            # ここで握りつぶさないとカレンダー認証エラーがPDF解析処理全体を
+            # 巻き込んで失敗させてしまう（解析結果がユーザーに届かなくなる）。
+            logger.error(
+                "[Calendar] トークンのリフレッシュに失敗しました（%s）。"
+                "カレンダー登録をスキップします。"
+                "scripts/authorize_google.py で再認証し、"
+                "GOOGLE_CALENDAR_CREDENTIALS_JSON を更新してください。"
+                "（OAuth同意画面が「テスト」状態だとトークンは7日で失効します）",
+                e,
+            )
+            return None
 
     return creds
 
