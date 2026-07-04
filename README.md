@@ -58,7 +58,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 
 ## 🚀 セットアップ
 
-### 必要なアカウント（すべて無料）
+### 必要なアカウント
 
 1. **LINE Developers** → Messaging APIチャネル作成
 2. **Google AI Studio** → Gemini APIキー取得
