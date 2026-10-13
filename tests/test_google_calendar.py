@@ -180,7 +180,7 @@ class TestRegisterTaskToCalendar:
         assert captured["start"] == {"date": "2026-05-31"}
         assert captured["end"] == {"date": "2026-06-01"}
 
-    @pytest.mark.parametrize("due_date", ["5月10日", 20260510])
+    @pytest.mark.parametrize("due_date", ["5月10日", 20260510, "9999-12-31"])
     def test_returns_none_on_invalid_due_date(self, monkeypatch, due_date):
         monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
 
