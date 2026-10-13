@@ -8,6 +8,7 @@ Google Calendar連携モジュール
 """
 
 import json
+from datetime import date, timedelta
 import logging
 import os
 
@@ -26,6 +27,17 @@ SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
 def is_calendar_enabled() -> bool:
     """Google Calendar連携が設定されているか確認"""
     return bool(os.getenv("GOOGLE_CALENDAR_CREDENTIALS_JSON"))
+
+
+def _log_refresh_error(e: RefreshError) -> None:
+    logger.error(
+        "[Calendar] トークンのリフレッシュに失敗しました（%s）。"
+        "カレンダー登録をスキップします。"
+        "scripts/authorize_google.py で再認証し、"
+        "GOOGLE_CALENDAR_CREDENTIALS_JSON を更新してください。"
+        "（OAuth同意画面が「テスト」状態だとトークンは7日で失効します）",
+        e,
+    )
 
 
 def _get_credentials() -> Credentials | None:
@@ -51,14 +63,7 @@ def _get_credentials() -> Credentials | None:
             # invalid_grant など。リフレッシュトークンが失効・取り消し済み。
             # ここで握りつぶさないとカレンダー認証エラーがPDF解析処理全体を
             # 巻き込んで失敗させてしまう（解析結果がユーザーに届かなくなる）。
-            logger.error(
-                "[Calendar] トークンのリフレッシュに失敗しました（%s）。"
-                "カレンダー登録をスキップします。"
-                "scripts/authorize_google.py で再認証し、"
-                "GOOGLE_CALENDAR_CREDENTIALS_JSON を更新してください。"
-                "（OAuth同意画面が「テスト」状態だとトークンは7日で失効します）",
-                e,
-            )
+            _log_refresh_error(e)
             return None
 
     return creds
@@ -106,12 +111,29 @@ def register_task_to_calendar(task: dict) -> str | None:
     if not due_date:
         return None
 
+    try:
+        # 終日イベントの end.date は排他的（その日を含まない）ため翌日を指定する
+        end_date = (date.fromisoformat(due_date) + timedelta(days=1)).isoformat()
+    except ValueError:
+        logger.error("[Calendar] 日付形式が不正なため登録をスキップ: %s", due_date)
+        return None
+
     service = _build_service()
     if service is None:
         return None
 
     title = task.get("title", "学校タスク")
 
+    try:
+        return _insert_event(service, task, title, due_date, end_date)
+    except RefreshError as e:
+        # 保存済み認証情報には expiry がないため _get_credentials では
+        # リフレッシュされず、API呼び出し中の 401 を受けてここで失効が判明する
+        _log_refresh_error(e)
+        return None
+
+
+def _insert_event(service, task: dict, title: str, due_date: str, end_date: str) -> str | None:
     # カレンダー上の重複チェック
     existing_id = _find_existing_event(service, title, due_date)
     if existing_id:
@@ -135,7 +157,7 @@ def register_task_to_calendar(task: dict) -> str | None:
         "summary": title,
         "description": "\n".join(description_parts),
         "start": {"date": due_date},
-        "end": {"date": due_date},
+        "end": {"date": end_date},
         "reminders": {
             "useDefault": False,
             "overrides": [

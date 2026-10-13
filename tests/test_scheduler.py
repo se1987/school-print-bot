@@ -172,3 +172,27 @@ class TestFormatDateLabel:
         assert _format_date_label(date(2026, 4, 12)) == "4月12日（日）"
         # 2026-01-01 は木曜日
         assert _format_date_label(date(2026, 1, 1)) == "1月1日（木）"
+
+
+
+class TestSchedulerTimezone:
+    def test_jobs_fire_at_jst_regardless_of_host_tz(self, monkeypatch):
+        """ホストのTZに関係なく、毎朝7時JST・4月1日9時JSTに実行される"""
+        from datetime import datetime, timezone
+
+        import scheduler as sched_mod
+
+        triggers = {}
+        monkeypatch.setattr(
+            sched_mod.scheduler, "add_job",
+            lambda func, trigger, id, **kw: triggers.update({id: trigger}),
+        )
+        monkeypatch.setattr(sched_mod.scheduler, "start", lambda: None)
+        sched_mod.start_scheduler()
+
+        base = datetime(2026, 3, 31, 0, 0, tzinfo=timezone.utc)
+        daily = triggers["daily_reminder"].get_next_fire_time(None, base)
+        assert daily.astimezone(sched_mod.JST).strftime("%H:%M") == "07:00"
+
+        april = triggers["advance_grades"].get_next_fire_time(None, base)
+        assert april.astimezone(sched_mod.JST).strftime("%m-%d %H:%M") == "04-01 09:00"

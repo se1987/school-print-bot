@@ -154,3 +154,54 @@ class TestRegisterTaskToCalendar:
 
         assert result == "new_evt"
         mock_events.insert.assert_called_once()
+
+    def test_all_day_event_end_is_next_day(self, monkeypatch):
+        """終日イベントの end.date は排他的なので翌日を指定する"""
+        monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
+
+        captured = {}
+        mock_exec = MagicMock()
+        mock_exec.execute.return_value = {"id": "evt"}
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.return_value = {"items": []}
+        mock_events = MagicMock()
+        mock_events.insert.side_effect = lambda calendarId, body: (
+            captured.update(body) or mock_exec
+        )
+        mock_events.list.return_value = mock_list_exec
+        mock_service = MagicMock()
+        mock_service.events.return_value = mock_events
+
+        with patch("google_calendar._build_service", return_value=mock_service):
+            google_calendar.register_task_to_calendar(self._make_task(due_date="2026-05-31"))
+
+        assert captured["start"] == {"date": "2026-05-31"}
+        assert captured["end"] == {"date": "2026-06-01"}
+
+    def test_returns_none_on_invalid_due_date(self, monkeypatch):
+        monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
+
+        with patch("google_calendar._build_service") as mock_build:
+            result = google_calendar.register_task_to_calendar(self._make_task(due_date="5月10日"))
+
+        assert result is None
+        mock_build.assert_not_called()
+
+    def test_returns_none_on_refresh_error_during_api_call(self, monkeypatch):
+        """API呼び出し中の401→リフレッシュ失敗（invalid_grant）でも例外を外に出さない"""
+        from google.auth.exceptions import RefreshError
+
+        monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
+
+        mock_list_exec = MagicMock()
+        mock_list_exec.execute.side_effect = RefreshError("invalid_grant")
+        mock_events = MagicMock()
+        mock_events.list.return_value = mock_list_exec
+        mock_service = MagicMock()
+        mock_service.events.return_value = mock_events
+
+        with patch("google_calendar._build_service", return_value=mock_service):
+            result = google_calendar.register_task_to_calendar(self._make_task())
+
+        assert result is None
+        mock_events.insert.assert_not_called()
