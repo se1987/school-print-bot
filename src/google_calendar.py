@@ -114,8 +114,8 @@ def register_task_to_calendar(task: dict) -> str | None:
     try:
         # 終日イベントの end.date は排他的（その日を含まない）ため翌日を指定する
         end_date = (date.fromisoformat(due_date) + timedelta(days=1)).isoformat()
-    except ValueError:
-        logger.error("[Calendar] 日付形式が不正なため登録をスキップ: %s", due_date)
+    except (TypeError, ValueError):
+        logger.error("[Calendar] 日付形式が不正なため登録をスキップ: %r", due_date)
         return None
 
     service = _build_service()

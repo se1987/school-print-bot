@@ -7,6 +7,8 @@ google_calendar.py のテスト
 import json
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import google_calendar
 
 
@@ -178,11 +180,12 @@ class TestRegisterTaskToCalendar:
         assert captured["start"] == {"date": "2026-05-31"}
         assert captured["end"] == {"date": "2026-06-01"}
 
-    def test_returns_none_on_invalid_due_date(self, monkeypatch):
+    @pytest.mark.parametrize("due_date", ["5月10日", 20260510])
+    def test_returns_none_on_invalid_due_date(self, monkeypatch, due_date):
         monkeypatch.setenv("GOOGLE_CALENDAR_CREDENTIALS_JSON", '{"token": "x"}')
 
         with patch("google_calendar._build_service") as mock_build:
-            result = google_calendar.register_task_to_calendar(self._make_task(due_date="5月10日"))
+            result = google_calendar.register_task_to_calendar(self._make_task(due_date=due_date))
 
         assert result is None
         mock_build.assert_not_called()
