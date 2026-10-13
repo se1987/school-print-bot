@@ -59,9 +59,9 @@ scheduler.py — APScheduler jobs (daily reminders, April grade advance)
 - `line_handler.py` — Message routing (image/PDF/text), postback handling (Quick Reply buttons), child management commands, calendar mode settings, response formatting
 - `line_client.py` — reply / push / Quick Reply / content download wrappers around LINE Messaging API (lazy-initialized async client)
 - `gemini_client.py` — Gemini 2.5 Flash calls; extracts grade, tasks, events, notes as structured JSON
-- `google_calendar.py` — Registers tasks via Google Calendar API v3 (`googleapiclient`), with duplicate-event check. Token refresh failures (`RefreshError`, e.g. `invalid_grant`) are caught so PDF analysis degrades gracefully instead of failing.
+- `google_calendar.py` — Registers tasks via Google Calendar API v3 (`googleapiclient`), with duplicate-event check. `_get_credentials` catches `RefreshError` (e.g. `invalid_grant`) so calendar failures don't abort PDF analysis. Known gap: the stored credentials JSON has no `expiry`, so that proactive refresh is skipped and a refresh triggered later by a 401 inside `.execute()` is not caught there.
 - `database.py` — SQLite CRUD; grade-matching logic for filtering tasks by child's grade; per-user calendar mode
-- `scheduler.py` — APScheduler cron jobs: 22:00 UTC (= 7:00 AM JST) daily reminders per child; April 1 00:00 UTC (= 9:00 AM JST) automatic grade advance
+- `scheduler.py` — APScheduler cron jobs: daily reminders per child at hour 22, and automatic grade advance on April 1 at hour 0. No time zone is set on the scheduler or triggers, so these run in the **host's local time zone** — on a UTC host (Railway default) that is 7:00 AM JST and 9:00 AM JST. On a JST host they would fire 9 hours off.
 
 ## Database Schema
 
@@ -102,7 +102,7 @@ Re-uploading a print whose tasks already exist re-registers tasks that were not 
 
 ## Google OAuth Notes
 
-- The calendar integration calls the Google Calendar REST API directly from deterministic Python code (scope: `calendar.events`). Gemini only extracts data; it does not call Google APIs. The app does **not** use Google Workspace MCP, so it is not an "AI agent" OAuth client in Google's sense.
+- The calendar integration calls the Google Calendar REST API directly from deterministic Python code (scope: `calendar.events`). Gemini only extracts data; it does not call Google APIs. The app does not use Google Workspace MCP. Not using MCP alone does not settle whether Google classifies the OAuth client as agentic, though — in `auto` mode Gemini's output decides which events are created on the user's behalf. When Google changes its agentic-client rules (e.g. the `is_agentic` setting), assess the client against Google's current criteria in the Cloud Console docs rather than relying on this note.
 - The OAuth consent screen must be in production ("公開") — in testing mode refresh tokens expire after 7 days.
 - Re-auth: run `scripts/authorize_google.py` and replace `GOOGLE_CALENDAR_CREDENTIALS_JSON` in Railway.
 
