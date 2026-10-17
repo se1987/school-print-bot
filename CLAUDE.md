@@ -28,6 +28,8 @@ python scripts/setup_richmenu.py     # Create/upload LINE rich menu and set it a
 
 No lint command is configured. Docker (`Dockerfile`, `docker-compose.yml`) is also available.
 
+Dependency updates come from Dependabot (`.github/dependabot.yml`): pip and GitHub Actions are checked every Monday 04:00 JST, with a 3-day cooldown after each release. Minor/patch updates arrive grouped in one PR; majors arrive as separate PRs. Nothing is auto-merged — PRs are reviewed (CI green + `pytest`) before merging.
+
 ## Environment Variables
 
 Copy `.env.example` and fill in:
