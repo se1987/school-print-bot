@@ -45,5 +45,7 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     groups:
+      # major はグループに入れず個別 PR にする（pip と同じ方針）
       actions:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
