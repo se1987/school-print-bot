@@ -1,0 +1,49 @@
+version: 2
+
+# 依存パッケージの更新を Dependabot に見張らせる。
+#
+#  方針:
+#   - requirements.txt は == で厳密に固定しているので、更新は Dependabot の PR で行う
+#   - リリース直後には飛びつかない（cooldown）
+#   - minor / patch は1本の PR にまとめ、major は1件ずつ別の PR にする
+#     （Gemini・LINE・Google カレンダー連携の破壊的変更を、他の更新に紛れ込ませない）
+#   - 自動マージはしない。週次レビューで人（と Claude）が確認してからマージする
+#
+#  cooldown = リリースから何日待って PR を出すか。
+#  公開直後に差し替えられる悪意ある版を踏まないための待機期間。
+#  セキュリティ更新には cooldown はかからない＝脆弱性の修正は待たされない。
+
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Asia/Tokyo"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # ワークフローが使う actions（actions/checkout など）も同じ方針で更新する
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "Asia/Tokyo"
+    cooldown:
+      default-days: 3
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
