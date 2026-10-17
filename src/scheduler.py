@@ -13,9 +13,11 @@ import database as db
 
 logger = logging.getLogger(__name__)
 
-scheduler = AsyncIOScheduler()
-
 JST = timezone(timedelta(hours=9))
+
+# ホストのタイムゾーンに依存しないよう JST に固定する
+scheduler = AsyncIOScheduler(timezone=JST)
+
 _WEEKDAYS_JA = ["月", "火", "水", "木", "金", "土", "日"]
 
 
@@ -236,17 +238,17 @@ async def advance_grades_april():
 
 
 def start_scheduler():
-    # 毎朝7時 JST = UTC 22:00（前日）
+    # 毎朝7時 JST
     scheduler.add_job(
         send_daily_reminders,
-        CronTrigger(hour=22, minute=0),
+        CronTrigger(hour=7, minute=0, timezone=JST),
         id="daily_reminder",
         replace_existing=True,
     )
-    # 4月1日 9時 JST = UTC 0時（4月1日）
+    # 4月1日 9時 JST
     scheduler.add_job(
         advance_grades_april,
-        CronTrigger(month=4, day=1, hour=0, minute=0),
+        CronTrigger(month=4, day=1, hour=9, minute=0, timezone=JST),
         id="advance_grades",
         replace_existing=True,
     )

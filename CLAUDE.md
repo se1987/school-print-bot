@@ -61,9 +61,9 @@ scheduler.py — APScheduler jobs (daily reminders, April grade advance)
 - `line_handler.py` — Message routing (image/PDF/text), postback handling (Quick Reply buttons), child management commands, calendar mode settings, response formatting
 - `line_client.py` — reply / push / Quick Reply / content download wrappers around LINE Messaging API (lazy-initialized async client)
 - `gemini_client.py` — Gemini 2.5 Flash calls; extracts grade, tasks, events, notes as structured JSON
-- `google_calendar.py` — Registers tasks via Google Calendar API v3 (`googleapiclient`), with duplicate-event check. `_get_credentials` catches `RefreshError` (e.g. `invalid_grant`) so calendar failures don't abort PDF analysis. Known gap: the stored credentials JSON has no `expiry`, so that proactive refresh is skipped and a refresh triggered later by a 401 inside `.execute()` is not caught there.
+- `google_calendar.py` — Registers tasks via Google Calendar API v3 (`googleapiclient`), with duplicate-event check. `RefreshError` (e.g. `invalid_grant`) is caught both in `_get_credentials` and around the API calls in `register_task_to_calendar` — the stored credentials JSON has no `expiry`, so in practice the refresh happens on a 401 inside `.execute()` — so calendar failures don't abort PDF analysis. All-day events use an exclusive `end.date` (due_date + 1 day).
 - `database.py` — SQLite CRUD; grade-matching logic for filtering tasks by child's grade; per-user calendar mode
-- `scheduler.py` — APScheduler cron jobs: daily reminders per child at hour 22, and automatic grade advance on April 1 at hour 0. No time zone is set on the scheduler or triggers, so these run in the **host's local time zone** — on a UTC host (Railway default) that is 7:00 AM JST and 9:00 AM JST. On a JST host they would fire 9 hours off.
+- `scheduler.py` — APScheduler cron jobs pinned to JST (independent of host time zone): 7:00 AM JST daily reminders per child; April 1 9:00 AM JST automatic grade advance
 
 ## Database Schema
 
