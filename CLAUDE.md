@@ -115,4 +115,4 @@ Re-uploading a print whose tasks already exist re-registers tasks that were not 
 3. Set LINE webhook URL to `https://your-app.up.railway.app/callback`
 4. Mount a Railway Volume on the directory of `DB_PATH` — the container filesystem is ephemeral, so SQLite data is lost on redeploy otherwise
 
-See `docs/operations.md` for console-side settings that are easy to lose (Volume, OAuth publishing, Gemini billing).
+See `docs/operations.md` for console-side settings that are easy to lose (Volume, OAuth publishing, Gemini billing) and the secret-rotation runbook for a suspected leak.
