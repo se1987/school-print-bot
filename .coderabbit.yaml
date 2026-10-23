@@ -1,0 +1,57 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit の設定。GitHub App のインストールは別途 GitHub 側で行う。
+# リファレンス: https://docs.coderabbit.ai/reference/configuration
+
+language: "ja-JP"
+early_access: false
+
+reviews:
+  # chill: 重要な指摘に絞る / assertive: 細かい指摘も多く出す
+  profile: "chill"
+  # true にすると指摘があるとき「Request changes」でマージをブロックする。
+  # 個人運用なのでコメントのみにとどめる
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  poem: false
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - "main"
+
+  path_filters:
+    - "!data/**"
+    - "!**/*.db"
+
+  path_instructions:
+    - path: "src/**/*.py"
+      instructions: |
+        - FastAPI + LINE Messaging API + Gemini + Google Calendar の Bot。CLAUDE.md の「Architecture」「Key Domain Logic」を前提に読むこと。
+        - 公開リポジトリ。API キー・トークン・LINE ユーザー ID・子どもの実名など個人情報がコードやログ出力に紛れていないか最優先で確認する。
+        - 外部 API（LINE / Gemini / Google）の失敗が Webhook 全体を落とさないか確認する。Webhook は即時 200 を返し、重い処理はバックグラウンドで行う設計。
+        - Google Calendar の RefreshError は捕捉して縮退運転する方針。例外を握りつぶして無言で失敗するコードは指摘する。
+        - 学年の範囲表記（1〜4年 / 1-4年 / 1～4年）の判定と下校時刻の学年別出し分けはコア機能。ここに触れる変更はエッジケース（単一学年・全学年・表記ゆれ）を確認する。
+        - 日時は JST 前提。naive datetime と aware datetime の混在や、ホストのタイムゾーン依存を指摘する。
+        - SQLite のスキーマ変更は init_db の ALTER TABLE 移行で後方互換を保つこと。
+    - path: "tests/**/*.py"
+      instructions: |
+        - pytest。テストデータは架空の名前・学年のみを使うこと。実在しそうな個人情報があれば指摘する。
+        - 外部 API を呼ぶテストはモックされているか確認する。
+    - path: "scripts/**/*.py"
+      instructions: |
+        - 運用者が手元で実行するワンオフスクリプト。認証情報をファイルに保存する場合、そのパスが .gitignore に含まれているか確認する。
+    - path: "docs/**/*.md"
+      instructions: |
+        - 公開リポジトリの運用メモ。アカウント名・ワークスペース名・キーの一部・インシデント通知の文面など、個別事情が書かれていないか確認する。手順そのものは書いてよい。
+
+  tools:
+    ruff:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+chat:
+  auto_reply: true
