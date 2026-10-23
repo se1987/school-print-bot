@@ -1,11 +1,11 @@
-fastapi==0.115.12
-uvicorn==0.34.2
-line-bot-sdk==3.14.3
+fastapi==0.156.3
+uvicorn==0.54.0
+line-bot-sdk==3.26.0
 google-genai==1.14.0
-google-api-python-client==2.166.0
-google-auth-oauthlib==1.2.1
-python-dotenv==1.1.0
-aiohttp==3.11.18
-apscheduler==3.11.0
+google-api-python-client==2.201.0
+google-auth-oauthlib==1.5.0
+python-dotenv==1.2.4
+aiohttp==3.14.5
+apscheduler==3.11.3
 Pillow==11.2.1
 certifi==2026.10.23  # eMudhra 中間CA侵害対応（2026.10.19 以降で該当ルートを除外）
