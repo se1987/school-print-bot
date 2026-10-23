@@ -8,3 +8,4 @@ python-dotenv==1.1.0
 aiohttp==3.11.18
 apscheduler==3.11.0
 Pillow==11.2.1
+certifi==2026.10.23  # eMudhra 中間CA侵害対応（2026.10.19 以降で該当ルートを除外）
