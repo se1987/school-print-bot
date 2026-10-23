@@ -30,6 +30,8 @@ No lint command is configured. Docker (`Dockerfile`, `docker-compose.yml`) is al
 
 Dependency updates come from Dependabot (`.github/dependabot.yml`): pip and GitHub Actions are checked every Monday 04:00 JST, with a 3-day cooldown after each release. Minor/patch updates arrive grouped in one PR; majors arrive as separate PRs. Nothing is auto-merged — PRs are reviewed (CI green + `pytest`) before merging.
 
+PR reviews also come from CodeRabbit, configured in `.coderabbit.yaml` (Japanese comments, `chill` profile, path-specific instructions, Ruff and secret scanning enabled). The repository is public: never commit credentials, LINE user IDs, real names, or incident-specific details; `docs/operations.md` holds runbooks only.
+
 ## Environment Variables
 
 Copy `.env.example` and fill in:
