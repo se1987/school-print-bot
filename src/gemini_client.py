@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ async def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> di
         return {
             "summary": "解析中にエラーが発生しました。",
             "tasks": [],
-            "error": str(e),
+            "error": _user_error_message(e),
         }
 
 
@@ -147,8 +147,38 @@ async def analyze_pdf(pdf_bytes: bytes) -> dict:
         return {
             "summary": "解析中にエラーが発生しました。",
             "tasks": [],
-            "error": str(e),
+            "error": _user_error_message(e),
         }
+
+
+def _user_error_message(e: Exception) -> str:
+    """Gemini APIの例外をLINEユーザー向けの分かりやすいメッセージに変換する
+
+    生のエラー内容（API応答の詳細）はログにのみ残し、ユーザーには見せない。
+    """
+    if isinstance(e, errors.APIError):
+        if e.code == 402:
+            return (
+                "AIの利用料金の残高が不足しているため、解析できませんでした。\n"
+                "Botの管理者に連絡してください。"
+            )
+        if e.code == 429:
+            return (
+                "AIの利用回数が上限に達したため、解析できませんでした。\n"
+                "しばらく時間をおいてから、もう一度送信してください。"
+            )
+        # APIキーが無効な場合、Gemini は 401 ではなく 400 (API_KEY_INVALID) を返す
+        if e.code in (401, 403) or (e.code == 400 and "API key" in (e.message or "")):
+            return (
+                "AIの認証に失敗したため、解析できませんでした。\n"
+                "Botの管理者に連絡してください。"
+            )
+        if isinstance(e, errors.ServerError):
+            return (
+                "AIのサービスが一時的に混み合っています。\n"
+                "しばらく時間をおいてから、もう一度送信してください。"
+            )
+    return "もう一度送信してみてください。"
 
 
 def _parse_response(text: str) -> dict:
