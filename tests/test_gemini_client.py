@@ -82,7 +82,9 @@ class TestUserErrorMessage:
 
     def test_rate_limited(self):
         e = errors.ClientError(429, {"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}})
-        assert "上限" in _user_error_message(e)
+        msg = _user_error_message(e)
+        assert "上限" in msg
+        assert "管理者" in msg
 
     def test_invalid_api_key(self):
         e = errors.ClientError(400, {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}})
