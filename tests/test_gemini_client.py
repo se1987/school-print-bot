@@ -98,3 +98,90 @@ class TestUserErrorMessage:
         msg = _user_error_message(RuntimeError("secret internal detail"))
         assert "secret" not in msg
         assert "もう一度" in msg
+
+
+class TestNormalizeTask:
+    """_parse_response がタスクの補助フィールド（原文・曜日）を揃えること"""
+
+    def _parse_tasks(self, tasks_json: str):
+        return _parse_response(f'{{"summary": "s", "tasks": {tasks_json}}}')["tasks"]
+
+    def test_weekday_variants_are_normalized(self):
+        tasks = self._parse_tasks(
+            '[{"title": "a", "weekday_on_print": "(木)"},'
+            ' {"title": "b", "weekday_on_print": "木曜日"},'
+            ' {"title": "c", "weekday_on_print": "木"}]'
+        )
+        assert [t["weekday_on_print"] for t in tasks] == ["木", "木", "木"]
+
+    def test_weekday_without_day_char_becomes_none(self):
+        tasks = self._parse_tasks('[{"title": "a", "weekday_on_print": "不明"}, {"title": "b", "weekday_on_print": 3}]')
+        assert [t["weekday_on_print"] for t in tasks] == [None, None]
+
+    def test_date_like_value_is_not_mistaken_for_sunday(self):
+        # "5日" の「日」を日曜と取り違えない。括弧付きなら日付が混ざっていても曜日を拾う
+        tasks = self._parse_tasks(
+            '[{"title": "a", "weekday_on_print": "5日"},'
+            ' {"title": "b", "weekday_on_print": "5日(金)"},'
+            ' {"title": "c", "weekday_on_print": "（日）"},'
+            ' {"title": "d", "weekday_on_print": "木曜"}]'
+        )
+        assert [t["weekday_on_print"] for t in tasks] == [None, "金", "日", "木"]
+
+    def test_missing_fields_default_to_none(self):
+        [task] = self._parse_tasks('[{"title": "a"}]')
+        assert task["source_text"] is None
+        assert task["weekday_on_print"] is None
+
+    def test_source_text_is_trimmed_and_truncated(self):
+        long_text = "あ" * 100
+        tasks = self._parse_tasks(f'[{{"title": "a", "source_text": "  5日(水)\\n 親子ふれあい活動 "}}, {{"title": "b", "source_text": "{long_text}"}}]')
+        assert tasks[0]["source_text"] == "5日(水) 親子ふれあい活動"
+        assert len(tasks[1]["source_text"]) == 60
+
+    def test_non_string_source_text_becomes_none(self):
+        [task] = self._parse_tasks('[{"title": "a", "source_text": 123}]')
+        assert task["source_text"] is None
+
+    def test_non_list_tasks_and_non_dict_items_are_dropped(self):
+        # 文字列など想定外の形は空扱い。ただし欠落を知らせるため1件の除外として数える
+        result = _parse_response('{"summary": "s", "tasks": "none"}')
+        assert result["tasks"] == []
+        assert result["dropped_task_count"] == 1
+        # null と空配列は「予定なし」で、欠落ではない
+        assert _parse_response('{"summary": "s", "tasks": null}')["dropped_task_count"] == 0
+        assert _parse_response('{"summary": "s", "tasks": []}')["dropped_task_count"] == 0
+        assert self._parse_tasks('[{"title": "a"}, "junk", 1]') == [
+            {"title": "a", "source_text": None, "weekday_on_print": None}
+        ]
+
+    def test_tasks_without_string_title_are_dropped(self):
+        # title が数値・null・空文字のタスクは表示も重複判定もできないので落とす
+        tasks = self._parse_tasks('[{"title": 123}, {"title": null}, {"title": "  "}, {"title": "ok"}]')
+        assert [t["title"] for t in tasks] == ["ok"]
+
+    def test_tasks_with_non_string_due_date_are_dropped(self):
+        # due_date が配列や数値だと DB 保存で落ちるので除外して件数に数える。文字列と null は通す
+        result = _parse_response(
+            '{"summary": "s", "tasks": ['
+            '{"title": "a", "due_date": ["2026-11-05", "2026-11-06"]}, '
+            '{"title": "b", "due_date": 20261105}, '
+            '{"title": "c", "due_date": null}, '
+            '{"title": "d", "due_date": "2026-11-05"}]}'
+        )
+        assert [t["title"] for t in result["tasks"]] == ["c", "d"]
+        assert result["dropped_task_count"] == 2
+
+    def test_single_task_dict_is_wrapped_in_list(self):
+        # 1件だけのときに配列で包み忘れた応答でも、その予定を落とさない
+        result = _parse_response('{"summary": "s", "tasks": {"title": "運動会"}}')
+        assert [t["title"] for t in result["tasks"]] == ["運動会"]
+        assert result["dropped_task_count"] == 0
+
+    def test_dropped_task_count_is_reported(self):
+        # 除外した件数は返信で保護者に知らせるために残す
+        result = _parse_response('{"summary": "s", "tasks": [{"title": null}, "junk", {"title": "ok"}]}')
+        assert result["dropped_task_count"] == 2
+        assert _parse_response('{"summary": "s", "tasks": [{"title": "ok"}]}')["dropped_task_count"] == 0
+        assert _parse_response('{"summary": "s"}')["dropped_task_count"] == 0
+        assert _parse_response("not json")["dropped_task_count"] == 0
