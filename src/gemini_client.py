@@ -210,7 +210,12 @@ def _parse_response(text: str) -> dict:
         if "summary" not in result:
             result["summary"] = "要約を取得できませんでした。"
         tasks = result.get("tasks")
-        tasks = tasks if isinstance(tasks, list) else []
+        if isinstance(tasks, dict):
+            # 1件だけのときに配列で包み忘れた形。中身は普通のタスクなので救う
+            tasks = [tasks]
+        elif not isinstance(tasks, list):
+            # None は「予定なし」。それ以外の想定外の形は件数が分からないので、1件の欠落として知らせる
+            tasks = [] if tasks is None else [None]
         # title が文字列でないタスクは後段（表示・重複判定・DB保存）で扱えないので除外する。
         # 黙って落とすと保護者が欠落に気づけないので、件数だけ返信側に渡す（内容はログにも出さない）
         result["tasks"] = [

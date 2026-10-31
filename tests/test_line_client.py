@@ -11,6 +11,7 @@ from line_client import (
     LINE_MESSAGES_PER_REQUEST,
     LINE_TEXT_MAX_UNITS,
     _build_quick_reply,
+    _push,
     _reply,
     _text_messages,
     split_text,
@@ -73,9 +74,33 @@ class TestTextMessages:
 class _FakeApi:
     def __init__(self):
         self.requests = []
+        self.pushes = []
 
     async def reply_message(self, request):
         self.requests.append(request)
+
+    async def push_message(self, request):
+        self.pushes.append(request)
+
+
+class TestPushBatching:
+    def test_sends_all_messages_in_batches_of_five(self, monkeypatch):
+        api = _FakeApi()
+        monkeypatch.setattr(line_client, "_get_line_api", lambda: api)
+        qr = _build_quick_reply([("登録", "x")])
+        text = "\n".join(["あ" * (LINE_TEXT_MAX_UNITS - 1)] * 11)
+        messages = _text_messages(text, quick_reply=qr)
+        assert len(messages) == 11
+
+        asyncio.run(_push("U_dummy", messages))
+
+        # 5 / 5 / 1 件に分かれ、順序が保たれ、Quick Reply は最後の1件だけに付く
+        assert [len(r.messages) for r in api.pushes] == [5, 5, 1]
+        assert all(r.to == "U_dummy" for r in api.pushes)
+        sent = [m for r in api.pushes for m in r.messages]
+        assert [m.text for m in sent] == [m.text for m in messages]
+        assert all(m.quick_reply is None for m in sent[:-1])
+        assert sent[-1].quick_reply == qr
 
 
 class TestReplyOverflow:

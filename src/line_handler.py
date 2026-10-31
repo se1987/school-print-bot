@@ -661,7 +661,7 @@ def _format_analysis_result(
             lines.append(_warning_footer(warning_count, cal_count + re_registered_count > 0, pending_confirm))
         if dropped_count:
             lines.append(
-                f"⚠️ {dropped_count}件は名前を読み取れなかったため保存していません。"
+                f"⚠️ {dropped_count}件は内容を読み取れなかったため保存していません。"
                 "プリントを確認し、必要なら撮り直して送ってください"
             )
         if skipped_count:

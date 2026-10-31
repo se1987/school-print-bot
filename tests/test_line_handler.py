@@ -148,7 +148,7 @@ class TestFormatAnalysisResult:
 
         result = {"grade": None, "summary": "s", "tasks": [], "notes": [], "dropped_task_count": 2}
         text = line_handler._format_analysis_result(result, children=[])
-        assert "⚠️ 2件は名前を読み取れなかったため保存していません" in text
+        assert "⚠️ 2件は内容を読み取れなかったため保存していません" in text
 
         result["dropped_task_count"] = 0
         assert "読み取れなかった" not in line_handler._format_analysis_result(result, children=[])

@@ -144,7 +144,13 @@ class TestNormalizeTask:
         assert task["source_text"] is None
 
     def test_non_list_tasks_and_non_dict_items_are_dropped(self):
-        assert _parse_response('{"summary": "s", "tasks": "none"}')["tasks"] == []
+        # 文字列など想定外の形は空扱い。ただし欠落を知らせるため1件の除外として数える
+        result = _parse_response('{"summary": "s", "tasks": "none"}')
+        assert result["tasks"] == []
+        assert result["dropped_task_count"] == 1
+        # null と空配列は「予定なし」で、欠落ではない
+        assert _parse_response('{"summary": "s", "tasks": null}')["dropped_task_count"] == 0
+        assert _parse_response('{"summary": "s", "tasks": []}')["dropped_task_count"] == 0
         assert self._parse_tasks('[{"title": "a"}, "junk", 1]') == [
             {"title": "a", "source_text": None, "weekday_on_print": None}
         ]
@@ -153,6 +159,12 @@ class TestNormalizeTask:
         # title が数値・null・空文字のタスクは表示も重複判定もできないので落とす
         tasks = self._parse_tasks('[{"title": 123}, {"title": null}, {"title": "  "}, {"title": "ok"}]')
         assert [t["title"] for t in tasks] == ["ok"]
+
+    def test_single_task_dict_is_wrapped_in_list(self):
+        # 1件だけのときに配列で包み忘れた応答でも、その予定を落とさない
+        result = _parse_response('{"summary": "s", "tasks": {"title": "運動会"}}')
+        assert [t["title"] for t in result["tasks"]] == ["運動会"]
+        assert result["dropped_task_count"] == 0
 
     def test_dropped_task_count_is_reported(self):
         # 除外した件数は返信で保護者に知らせるために残す
