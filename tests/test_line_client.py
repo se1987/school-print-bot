@@ -4,7 +4,18 @@ line_client.py のテスト
 - _text_messages: Quick Reply は最後のメッセージにだけ付く
 """
 
-from line_client import LINE_TEXT_MAX_UNITS, _build_quick_reply, _text_messages, split_text, utf16_len
+import asyncio
+
+import line_client
+from line_client import (
+    LINE_MESSAGES_PER_REQUEST,
+    LINE_TEXT_MAX_UNITS,
+    _build_quick_reply,
+    _reply,
+    _text_messages,
+    split_text,
+    utf16_len,
+)
 
 
 class TestUtf16Len:
@@ -57,3 +68,31 @@ class TestTextMessages:
         [message] = _text_messages("短い", quick_reply=qr)
         assert message.text == "短い"
         assert message.quick_reply == qr
+
+
+class _FakeApi:
+    def __init__(self):
+        self.requests = []
+
+    async def reply_message(self, request):
+        self.requests.append(request)
+
+
+class TestReplyOverflow:
+    def test_keeps_quick_reply_when_truncating_to_five(self, monkeypatch):
+        api = _FakeApi()
+        monkeypatch.setattr(line_client, "_get_line_api", lambda: api)
+        qr = _build_quick_reply([("登録", "x")])
+        # 6件分の本文（各塊が上限ぎりぎり）に Quick Reply を付ける
+        text = "\n".join(["あ" * (LINE_TEXT_MAX_UNITS - 1)] * 6)
+        messages = _text_messages(text, quick_reply=qr)
+        assert len(messages) == 6
+
+        asyncio.run(_reply("token", messages))
+
+        [request] = api.requests
+        sent = request.messages
+        assert len(sent) == LINE_MESSAGES_PER_REQUEST
+        assert all(m.quick_reply is None for m in sent[:-1])
+        assert sent[-1].quick_reply == qr
+        assert sent[-1].text == messages[4].text

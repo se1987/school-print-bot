@@ -79,13 +79,18 @@ async def reply_text_with_quick_reply(
 
 
 async def _reply(reply_token: str, messages: list[TextMessage]) -> None:
-    # reply token は1回しか使えないので、1リクエストに収まる分だけ送る
+    # reply token は1回しか使えないので、1リクエストに収まる分だけ送る。
+    # 現状 reply で送るのは一覧・ヘルプ等で上限（5件 × 4,800 単位）に届くことはないが、
+    # 万一超えたときも Quick Reply のボタンだけは残った最後のメッセージに付け替えて失わない
     if len(messages) > LINE_MESSAGES_PER_REQUEST:
         logger.warning(
             "[LINE] Reply が %d 件に分割され上限を超えたため、先頭 %d 件のみ送信します",
             len(messages), LINE_MESSAGES_PER_REQUEST,
         )
+        quick_reply = messages[-1].quick_reply
         messages = messages[:LINE_MESSAGES_PER_REQUEST]
+        if quick_reply is not None:
+            messages[-1] = TextMessage(text=messages[-1].text, quick_reply=quick_reply)
     api = _get_line_api()
     try:
         await api.reply_message(ReplyMessageRequest(reply_token=reply_token, messages=messages))
