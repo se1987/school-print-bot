@@ -216,13 +216,9 @@ def _parse_response(text: str) -> dict:
         elif not isinstance(tasks, list):
             # None は「予定なし」。それ以外の想定外の形は件数が分からないので、1件の欠落として知らせる
             tasks = [] if tasks is None else [None]
-        # title が文字列でないタスクは後段（表示・重複判定・DB保存）で扱えないので除外する。
+        # 後段（表示・重複判定・DB保存）で扱えない形のタスクは除外する。
         # 黙って落とすと保護者が欠落に気づけないので、件数だけ返信側に渡す（内容はログにも出さない）
-        result["tasks"] = [
-            _normalize_task(t)
-            for t in tasks
-            if isinstance(t, dict) and isinstance(t.get("title"), str) and t["title"].strip()
-        ]
+        result["tasks"] = [_normalize_task(t) for t in tasks if _is_usable_task(t)]
         result["dropped_task_count"] = len(tasks) - len(result["tasks"])
         if "notes" not in result:
             result["notes"] = []
@@ -240,6 +236,21 @@ def _parse_response(text: str) -> dict:
             "grade": None,
             "dropped_task_count": 0,
         }
+
+
+def _is_usable_task(task) -> bool:
+    """title が空でない文字列で、due_date が文字列か null のタスクだけを通す
+
+    due_date が配列などだと、重複判定の SQL バインドや DB 保存で例外になり、
+    解析結果全体が保護者に届かなくなる。日付として読めるかは後段で判定する。
+    """
+    if not isinstance(task, dict):
+        return False
+    title = task.get("title")
+    if not (isinstance(title, str) and title.strip()):
+        return False
+    due = task.get("due_date")
+    return due is None or isinstance(due, str)
 
 
 # 返信に引用する原文の長さの上限（LINE の1行に収まる程度）

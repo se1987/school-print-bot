@@ -160,6 +160,18 @@ class TestNormalizeTask:
         tasks = self._parse_tasks('[{"title": 123}, {"title": null}, {"title": "  "}, {"title": "ok"}]')
         assert [t["title"] for t in tasks] == ["ok"]
 
+    def test_tasks_with_non_string_due_date_are_dropped(self):
+        # due_date が配列や数値だと DB 保存で落ちるので除外して件数に数える。文字列と null は通す
+        result = _parse_response(
+            '{"summary": "s", "tasks": ['
+            '{"title": "a", "due_date": ["2026-11-05", "2026-11-06"]}, '
+            '{"title": "b", "due_date": 20261105}, '
+            '{"title": "c", "due_date": null}, '
+            '{"title": "d", "due_date": "2026-11-05"}]}'
+        )
+        assert [t["title"] for t in result["tasks"]] == ["c", "d"]
+        assert result["dropped_task_count"] == 2
+
     def test_single_task_dict_is_wrapped_in_list(self):
         # 1件だけのときに配列で包み忘れた応答でも、その予定を落とさない
         result = _parse_response('{"summary": "s", "tasks": {"title": "運動会"}}')
