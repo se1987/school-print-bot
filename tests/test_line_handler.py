@@ -5,6 +5,7 @@ line_handler.py のテスト
 """
 
 import re
+from datetime import date
 
 import pytest
 
@@ -102,3 +103,49 @@ class TestKeywordLength:
         """MAX_KEYWORD_LENGTH + 1 は validate_keyword が ValueError を送出する"""
         with pytest.raises(ValueError):
             validate_keyword("a" * (MAX_KEYWORD_LENGTH + 1))
+
+
+class TestFormatAnalysisResult:
+    """解析結果の返信に、曜日・原文・⚠️警告が入ること（子ども未登録なので DB 不要）"""
+
+    def _result(self, tasks):
+        return {"grade": "1年", "summary": "学年だより", "tasks": tasks, "notes": []}
+
+    def test_shows_weekday_and_source_text(self, monkeypatch):
+        import dates
+        import line_handler
+
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
+        task = {
+            "title": "親子ふれあい活動",
+            "due_date": "2026-11-05",
+            "task_type": "event",
+            "source_text": "5日(木) 親子ふれあい活動",
+        }
+        text = line_handler._format_analysis_result(self._result([task]), children=[])
+        assert "親子ふれあい活動 (11/5(木))" in text
+        assert "📝 原文:「5日(木) 親子ふれあい活動」" in text
+        assert "⚠️" not in text
+
+    def test_shows_warnings_and_footer_count(self, monkeypatch):
+        import dates
+        import line_handler
+
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
+        task = {"title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event"}
+        warnings_by_id = {id(task): ["⚠️ 曜日が合いません: テスト"]}
+        text = line_handler._format_analysis_result(
+            self._result([task]), children=[], warnings_by_id=warnings_by_id
+        )
+        assert "     ⚠️ 曜日が合いません: テスト" in text
+        assert "⚠️ 気になる点が1件あります" in text
+        assert "Googleカレンダー側で直してください" in text
+
+    def test_todo_deadline_uses_weekday_format(self, monkeypatch):
+        import dates
+        import line_handler
+
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
+        task = {"title": "上履きを持たせる", "due_date": "2026-11-06", "task_type": "task"}
+        text = line_handler._format_analysis_result(self._result([task]), children=[])
+        assert "上履きを持たせる（〜11/6(金)）" in text

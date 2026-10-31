@@ -98,3 +98,53 @@ class TestUserErrorMessage:
         msg = _user_error_message(RuntimeError("secret internal detail"))
         assert "secret" not in msg
         assert "もう一度" in msg
+
+
+class TestNormalizeTask:
+    """_parse_response がタスクの補助フィールド（原文・曜日）を揃えること"""
+
+    def _parse_tasks(self, tasks_json: str):
+        return _parse_response(f'{{"summary": "s", "tasks": {tasks_json}}}')["tasks"]
+
+    def test_weekday_variants_are_normalized(self):
+        tasks = self._parse_tasks(
+            '[{"title": "a", "weekday_on_print": "(木)"},'
+            ' {"title": "b", "weekday_on_print": "木曜日"},'
+            ' {"title": "c", "weekday_on_print": "木"}]'
+        )
+        assert [t["weekday_on_print"] for t in tasks] == ["木", "木", "木"]
+
+    def test_weekday_without_day_char_becomes_none(self):
+        tasks = self._parse_tasks('[{"title": "a", "weekday_on_print": "不明"}, {"title": "b", "weekday_on_print": 3}]')
+        assert [t["weekday_on_print"] for t in tasks] == [None, None]
+
+    def test_date_like_value_is_not_mistaken_for_sunday(self):
+        # "5日" の「日」を日曜と取り違えない。括弧付きなら日付が混ざっていても曜日を拾う
+        tasks = self._parse_tasks(
+            '[{"title": "a", "weekday_on_print": "5日"},'
+            ' {"title": "b", "weekday_on_print": "5日(金)"},'
+            ' {"title": "c", "weekday_on_print": "（日）"},'
+            ' {"title": "d", "weekday_on_print": "木曜"}]'
+        )
+        assert [t["weekday_on_print"] for t in tasks] == [None, "金", "日", "木"]
+
+    def test_missing_fields_default_to_none(self):
+        [task] = self._parse_tasks('[{"title": "a"}]')
+        assert task["source_text"] is None
+        assert task["weekday_on_print"] is None
+
+    def test_source_text_is_trimmed_and_truncated(self):
+        long_text = "あ" * 100
+        tasks = self._parse_tasks(f'[{{"title": "a", "source_text": "  5日(水)\\n 親子ふれあい活動 "}}, {{"title": "b", "source_text": "{long_text}"}}]')
+        assert tasks[0]["source_text"] == "5日(水) 親子ふれあい活動"
+        assert len(tasks[1]["source_text"]) == 60
+
+    def test_non_string_source_text_becomes_none(self):
+        [task] = self._parse_tasks('[{"title": "a", "source_text": 123}]')
+        assert task["source_text"] is None
+
+    def test_non_list_tasks_and_non_dict_items_are_dropped(self):
+        assert _parse_response('{"summary": "s", "tasks": "none"}')["tasks"] == []
+        assert self._parse_tasks('[{"title": "a"}, "junk", 1]') == [
+            {"title": "a", "source_text": None, "weekday_on_print": None}
+        ]

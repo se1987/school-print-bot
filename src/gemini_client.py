@@ -13,6 +13,8 @@ from datetime import datetime
 from google import genai
 from google.genai import errors, types
 
+from dates import JST, WEEKDAYS_JA
+
 logger = logging.getLogger(__name__)
 
 # Gemini クライアント初期化
@@ -42,7 +44,9 @@ SYSTEM_PROMPT = """あなたは学校から配布されるプリントを解析�
       "target_grades": ["対象学年のリスト。例: ['1年','2年','3年','4年','5年'] 。全学年なら['全学年']"],
       "dismissal_times": [
         {{"grades": "対象学年（例: '1〜4年'）", "time": "下校時刻（例: '13:00'）"}}
-      ]
+      ],
+      "source_text": "日付と行事名の根拠になった、プリント上の原文の短い引用（例: '5日(水) 親子ふれあい活動'）。表なら「日」列と行事名のセルをそのまま。見つからなければnull",
+      "weekday_on_print": "プリントにその予定の曜日が書かれていればその1文字（'月'〜'日'）。書かれていなければnull"
     }}
   ],
   "notes": ["タスクではないが保護者に有用な補足情報"]
@@ -86,6 +90,9 @@ SYSTEM_PROMPT = """あなたは学校から配布されるプリントを解析�
 - **異なる行（異なる日）のイベントを1つにまとめないでください**。例えば8日が「着任式・始業式」、9日が「入学式」なら、それぞれ別のイベントとして別の日付で抽出してください
 - 表の「日」列の数字と、その月を組み合わせて正確な日付（YYYY-MM-DD）を生成してください
 - 曜日列がある場合、日付と曜日が整合するか確認してください。不整合があれば曜日よりも日付番号を優先してください
+- **曜日が書かれている予定は、必ず weekday_on_print にその曜日を入れてください**（受け取り側で日付と照合し、読み間違いを見つけるために使います）
+- **各予定の source_text には、その日付を読み取った根拠の原文（「日」列の数字・曜日・行事名）をそのまま短く引用してください**
+- **同じ行事を複数の日付で出さないでください**。複数日にわたる行事は1件にまとめ、description に期間を書いてください
 
 ## 注意事項
 - 保護者が「忘れると困る」情報を最優先で抽出してください
@@ -97,7 +104,7 @@ SYSTEM_PROMPT = """あなたは学校から配布されるプリントを解析�
 
 async def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """画像を解析してタスク・予定を抽出する"""
-    today = datetime.now().strftime("%Y年%m月%d日")
+    today = datetime.now(JST).strftime("%Y年%m月%d日")
     prompt = SYSTEM_PROMPT.replace("{today}", today)
 
     try:
@@ -125,7 +132,7 @@ async def analyze_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> di
 
 async def analyze_pdf(pdf_bytes: bytes) -> dict:
     """PDFを解析してタスク・予定を抽出する"""
-    today = datetime.now().strftime("%Y年%m月%d日")
+    today = datetime.now(JST).strftime("%Y年%m月%d日")
     prompt = SYSTEM_PROMPT.replace("{today}", today)
 
     try:
@@ -200,8 +207,10 @@ def _parse_response(text: str) -> dict:
         # バリデーション
         if "summary" not in result:
             result["summary"] = "要約を取得できませんでした。"
-        if "tasks" not in result:
-            result["tasks"] = []
+        tasks = result.get("tasks")
+        result["tasks"] = [
+            _normalize_task(t) for t in (tasks if isinstance(tasks, list) else []) if isinstance(t, dict)
+        ]
         if "notes" not in result:
             result["notes"] = []
         if "grade" not in result:
@@ -217,3 +226,39 @@ def _parse_response(text: str) -> dict:
             "notes": [],
             "grade": None,
         }
+
+
+# 返信に引用する原文の長さの上限（LINE の1行に収まる程度）
+SOURCE_TEXT_MAX_LENGTH = 60
+
+
+def _normalize_task(task: dict) -> dict:
+    """Gemini が返したタスクの補助フィールド（原文・曜日）を表示しやすい形に揃える"""
+    source = task.get("source_text")
+    if isinstance(source, str):
+        source = " ".join(source.split())
+        task["source_text"] = source[:SOURCE_TEXT_MAX_LENGTH] if source else None
+    else:
+        task["source_text"] = None
+
+    task["weekday_on_print"] = _normalize_weekday(task.get("weekday_on_print"))
+    return task
+
+
+# "(木)" "（木）" のように括弧で囲まれた曜日
+_WEEKDAY_IN_PARENS_RE = re.compile(r"[（(]([月火水木金土日])[)）]")
+# "木" "木曜" "木曜日" のように曜日だけが書かれたもの
+_WEEKDAY_ONLY_RE = re.compile(r"^([月火水木金土日])(?:曜日?)?$")
+
+
+def _normalize_weekday(value) -> str | None:
+    """"(木)" "木曜日" "木" などを "木" に揃える。曜日と読めなければ None
+
+    "5日" のような日付を曜日の「日」と取り違えないよう、括弧内の1文字か、
+    曜日だけの表記しか受け付けない。
+    """
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    m = _WEEKDAY_IN_PARENS_RE.search(value) or _WEEKDAY_ONLY_RE.match(value)
+    return m.group(1) if m else None

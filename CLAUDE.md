@@ -54,6 +54,9 @@ LINE Webhook → FastAPI (main.py) ── returns 200 immediately, processes in 
          /      |       |       \
 gemini_client.py  database.py  google_calendar.py  line_client.py
 (AI analysis)    (SQLite)      (Calendar REST API) (LINE API wrapper)
+       ↓
+verification.py — consistency checks on extracted tasks (pure functions)
+dates.py        — JST / weekday / "11/5(木)" formatting helpers
 
 scheduler.py — APScheduler jobs (daily reminders, April grade advance)
 ```
@@ -62,7 +65,9 @@ scheduler.py — APScheduler jobs (daily reminders, April grade advance)
 - `main.py` — FastAPI app, env validation, webhook endpoint (`/callback`), lifespan (inits DB, starts scheduler). Webhook events run as background tasks so LINE gets a 200 before Gemini analysis finishes (avoids 499 timeouts on heavy PDFs).
 - `line_handler.py` — Message routing (image/PDF/text), postback handling (Quick Reply buttons), child management commands, calendar mode settings, response formatting
 - `line_client.py` — reply / push / Quick Reply / content download wrappers around LINE Messaging API (lazy-initialized async client)
-- `gemini_client.py` — Gemini 2.5 Flash calls; extracts grade, tasks, events, notes as structured JSON
+- `gemini_client.py` — Gemini 2.5 Flash calls; extracts grade, tasks, events, notes as structured JSON. Each task also carries `source_text` (short quote of the print text the date was read from) and `weekday_on_print` (the weekday printed next to it, normalized to one of 月〜日 or `None`); `_normalize_task` makes these fields safe to display. "Today" in the prompt is computed in JST.
+- `verification.py` — `check_tasks(tasks)` returns per-task ⚠️ warnings, no I/O: printed weekday vs. `due_date` weekday (suggests the matching date within ±3 days), the same title on two consecutive days, and a `due_date` more than 60 days past / 400 days ahead (year misread). Runs on the whole Gemini result in `_save_and_reply`, before duplicate filtering.
+- `dates.py` — `JST`, `today_jst()`, `weekday_ja()`, `format_date_ja()` (`"11/5(木)"`, year shown only when it differs from the current year)
 - `google_calendar.py` — Registers tasks via Google Calendar API v3 (`googleapiclient`), with duplicate-event check. `RefreshError` (e.g. `invalid_grant`) is caught both in `_get_credentials` and around the API calls in `register_task_to_calendar` — the stored credentials JSON has no `expiry`, so in practice the refresh happens on a 401 inside `.execute()` — so calendar failures don't abort PDF analysis. All-day events use an exclusive `end.date` (due_date + 1 day).
 - `database.py` — SQLite CRUD; grade-matching logic for filtering tasks by child's grade; per-user calendar mode
 - `scheduler.py` — APScheduler cron jobs pinned to JST (independent of host time zone): 7:00 AM JST daily reminders per child; April 1 9:00 AM JST automatic grade advance
@@ -89,6 +94,8 @@ Four SQLite tables (created in `database.py:init_db`; new columns are added via 
 - `ask` — show Quick Reply buttons (`cal_register` / `cal_skip` postbacks) after each analysis
 
 Re-uploading a print whose tasks already exist re-registers tasks that were not yet on the calendar (e.g., after the mode was changed).
+
+**Extraction evidence in the reply.** Table-style prints (学年だより) can make Gemini read a date one row off, so the analysis reply shows, per task, the date with its weekday, `📝 原文:「…」` (the `source_text` quote) and any ⚠️ from `verification.check_tasks`; the footer counts the warnings and points the parent to fix the event in Google Calendar. Warnings do not block registration — in `auto` mode the event is already on the calendar by the time the reply is sent.
 
 **LINE user commands:**
 | Input | Action |

@@ -17,6 +17,8 @@ from linebot.v3.webhooks import (
 import database as db
 import gemini_client
 import google_calendar
+import verification
+from dates import format_date_ja
 from line_client import (
     reply_text,
     reply_text_with_quick_reply,
@@ -124,6 +126,11 @@ async def _save_and_reply(user_id: str, result: dict):
         grade=result.get("grade"),
     )
     tasks = result.get("tasks", [])
+    # 読み取りのずれ（曜日不一致・同じ予定が連日・年ずれ）は、重複スキップで表示から
+    # 消える分も含めて Gemini の結果全体で判定し、表示するタスクに対応付ける
+    warnings_by_id = {
+        id(task): warns for task, warns in zip(tasks, verification.check_tasks(tasks)) if warns
+    }
     cal_count = 0
     skipped_count = 0
     re_registered_count = 0
@@ -189,6 +196,7 @@ async def _save_and_reply(user_id: str, result: dict):
         re_registered_count=re_registered_count,
         pending_existing_count=len(pending_existing_ids),
         pending_confirm=pending_confirm,
+        warnings_by_id=warnings_by_id,
     )
 
     if pending_confirm:
@@ -567,9 +575,15 @@ def _format_analysis_result(
     re_registered_count: int = 0,
     pending_existing_count: int = 0,
     pending_confirm: bool = False,
+    warnings_by_id: dict[int, list[str]] | None = None,
 ) -> str:
-    """解析結果をLINEメッセージ用にフォーマット"""
+    """解析結果をLINEメッセージ用にフォーマット
+
+    warnings_by_id は verification.check_tasks の結果を id(task) で引けるようにしたもの。
+    """
     lines = []
+    warnings_by_id = warnings_by_id or {}
+    warning_count = 0
 
     if "error" in result:
         return f"⚠️ 解析中にエラーが発生しました。\n{result['error']}"
@@ -592,12 +606,13 @@ def _format_analysis_result(
         lines.append("━━━━━━━━━━━━━━━━━")
         for task in events:
             due = task.get("due_date", "")
-            date_str = f" ({due})" if due else ""
+            date_str = f" ({format_date_ja(due)})" if due else ""
             lines.append(f"  📅 {task.get('title', '不明')}{date_str}")
 
             desc = task.get("description", "")
             if desc:
                 lines.append(f"     {desc}")
+            warning_count += _append_evidence_lines(lines, task, warnings_by_id)
 
             # 下校時刻の表示
             times = task.get("dismissal_times", [])
@@ -619,11 +634,12 @@ def _format_analysis_result(
         lines.append("━━━━━━━━━━━━━━━━━")
         for task in todo_tasks:
             due = task.get("due_date")
-            deadline = f"（〜{due}）" if due else ""
+            deadline = f"（〜{format_date_ja(due)}）" if due else ""
             lines.append(f"  ✏️ {task.get('title', '不明')}{deadline}")
             desc = task.get("description", "")
             if desc:
                 lines.append(f"     {desc}")
+            warning_count += _append_evidence_lines(lines, task, warnings_by_id)
 
     # --- 補足情報 ---
     notes = result.get("notes", [])
@@ -638,6 +654,11 @@ def _format_analysis_result(
         lines.append(f"\n━━━━━━━━━━━━━━━━━")
         if tasks:
             lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
+        if warning_count:
+            lines.append(
+                f"⚠️ 気になる点が{warning_count}件あります。プリントと見比べて、"
+                "違っていればGoogleカレンダー側で直してください"
+            )
         if skipped_count:
             lines.append(f"⏭️ {skipped_count}件は既に登録済みのためスキップしました")
         if cal_count > 0 or re_registered_count > 0:
@@ -666,3 +687,14 @@ def _format_analysis_result(
         lines.append("\n💡 「子ども登録 名前 ◯年」で\n   学年に合った下校時刻を表示できます")
 
     return "\n".join(lines)
+
+
+def _append_evidence_lines(lines: list[str], task: dict, warnings_by_id: dict[int, list[str]]) -> int:
+    """タスクの下に、読み取りの根拠（原文）と⚠️警告を追加する。追加した警告の件数を返す"""
+    source = task.get("source_text")
+    if source:
+        lines.append(f"     📝 原文:「{source}」")
+    warnings = warnings_by_id.get(id(task), [])
+    for warning in warnings:
+        lines.append(f"     {warning}")
+    return len(warnings)
