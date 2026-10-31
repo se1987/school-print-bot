@@ -655,10 +655,7 @@ def _format_analysis_result(
         if tasks:
             lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
         if warning_count:
-            lines.append(
-                f"⚠️ 気になる点が{warning_count}件あります。プリントと見比べて、"
-                "違っていればGoogleカレンダー側で直してください"
-            )
+            lines.append(_warning_footer(warning_count, cal_count + re_registered_count > 0, pending_confirm))
         if skipped_count:
             lines.append(f"⏭️ {skipped_count}件は既に登録済みのためスキップしました")
         if cal_count > 0 or re_registered_count > 0:
@@ -698,3 +695,17 @@ def _append_evidence_lines(lines: list[str], task: dict, warnings_by_id: dict[in
     for warning in warnings:
         lines.append(f"     {warning}")
     return len(warnings)
+
+
+def _warning_footer(count: int, registered: bool, pending_confirm: bool) -> str:
+    """⚠️ の件数と、状況に合った「直し方」の案内を返す
+
+    カレンダーに登録済みなら Google カレンダー側で直してもらう。登録前（ask の確認待ち）なら
+    ボタンを押す前に見比べてもらう。未登録（off モード・登録失敗）なら見比べるだけでよい。
+    """
+    head = f"⚠️ 気になる点が{count}件あります。プリントと見比べて"
+    if registered:
+        return f"{head}、違っていればGoogleカレンダー側で直してください"
+    if pending_confirm:
+        return f"{head}から、下のボタンで登録するか決めてください"
+    return f"{head}ご確認ください"

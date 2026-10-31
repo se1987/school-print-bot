@@ -72,8 +72,11 @@ def _year_far_off(due: date, today: date) -> str | None:
     return None
 
 
-def _normalize_title(title: str | None) -> str:
-    return "".join((title or "").split()).casefold()
+def _normalize_title(title) -> str:
+    """表記ゆれ（空白・大文字小文字）を吸収する。文字列以外は空扱い"""
+    if not isinstance(title, str):
+        return ""
+    return "".join(title.split()).casefold()
 
 
 def _consecutive_pairs(tasks: list[dict]) -> list[tuple[int, int]]:

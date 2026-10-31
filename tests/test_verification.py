@@ -105,3 +105,8 @@ class TestEdgeCases:
     def test_empty_or_non_string_weekday_is_ignored(self):
         tasks = [_task(weekday=""), _task(weekday=3), _task(weekday="木曜日")]
         assert check_tasks(tasks, today=TODAY) == [[], [], []]
+
+    def test_non_string_title_does_not_crash(self):
+        # 解析境界で落としているが、念のため検証側も文字列以外のタイトルで例外を出さない
+        tasks = [{"title": 123, "due_date": "2026-11-05"}, {"title": None, "due_date": "2026-11-06"}]
+        assert check_tasks(tasks, today=TODAY) == [[], []]

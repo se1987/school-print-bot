@@ -92,7 +92,7 @@ SYSTEM_PROMPT = """あなたは学校から配布されるプリントを解析�
 - 曜日列がある場合、日付と曜日が整合するか確認してください。不整合があれば曜日よりも日付番号を優先してください
 - **1つの日のマスに行事が複数行書かれていることがあります**（例: 「4 水」の行に「クリーンタイム」と「親子ふれあい活動（2年）」）。**次の「日」の数字が現れるまでの行事は、すべて直前の日付に属します**。2行目以降の行事を次の日に割り当てないでください
 - 日付と曜日だけで行事が空いている行（例: 「8 日」「9 月」）には、行事を割り当てないでください
-- **曜日が書かれている予定は、必ず weekday_on_print にその曜日を入れてください**（受け取り側で日付と照合し、読み間違いを見つけるために使います）。曜日は **行事が書かれている行の「日」の数字と同じ行** の曜日列から取ってください
+- **曜日が書かれている予定は、必ず weekday_on_print にその曜日を入れてください**（受け取り側で日付と照合し、読み間違いを見つけるために使います）。曜日は **その行事が属する日付の行（複数行のマスでは「日」の数字がある行）** の曜日列から取ってください
 - **各予定の source_text には、その日付を読み取った根拠の原文（「日」列の数字・曜日・行事名）をそのまま短く引用してください**
 - **1つの行事を、読み取りのずれで別の日付にも重ねて出さないでください**（同じ行事は1回だけ）。個人懇談期間のように本当に複数日にわたる行事は、開始日を due_date にして description に期間（例: 「12月10日まで」）を明記してください
 
@@ -210,8 +210,11 @@ def _parse_response(text: str) -> dict:
         if "summary" not in result:
             result["summary"] = "要約を取得できませんでした。"
         tasks = result.get("tasks")
+        # title が文字列でないタスクは後段（表示・重複判定・DB保存）で扱えないので除外する
         result["tasks"] = [
-            _normalize_task(t) for t in (tasks if isinstance(tasks, list) else []) if isinstance(t, dict)
+            _normalize_task(t)
+            for t in (tasks if isinstance(tasks, list) else [])
+            if isinstance(t, dict) and isinstance(t.get("title"), str) and t["title"].strip()
         ]
         if "notes" not in result:
             result["notes"] = []

@@ -148,3 +148,8 @@ class TestNormalizeTask:
         assert self._parse_tasks('[{"title": "a"}, "junk", 1]') == [
             {"title": "a", "source_text": None, "weekday_on_print": None}
         ]
+
+    def test_tasks_without_string_title_are_dropped(self):
+        # title が数値・null・空文字のタスクは表示も重複判定もできないので落とす
+        tasks = self._parse_tasks('[{"title": 123}, {"title": null}, {"title": "  "}, {"title": "ok"}]')
+        assert [t["title"] for t in tasks] == ["ok"]

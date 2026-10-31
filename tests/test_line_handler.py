@@ -139,7 +139,27 @@ class TestFormatAnalysisResult:
         )
         assert "     ⚠️ 曜日が合いません: テスト" in text
         assert "⚠️ 気になる点が1件あります" in text
-        assert "Googleカレンダー側で直してください" in text
+        # 未登録（cal_count=0）なら Google カレンダー側での修正は案内しない
+        assert "ご確認ください" in text
+        assert "Googleカレンダー側で直してください" not in text
+
+    def test_footer_guides_to_calendar_only_when_registered(self, monkeypatch):
+        import dates
+        import line_handler
+
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
+        task = {"title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event"}
+        warnings_by_id = {id(task): ["⚠️ テスト"]}
+        registered = line_handler._format_analysis_result(
+            self._result([task]), children=[], cal_count=1, warnings_by_id=warnings_by_id
+        )
+        assert "Googleカレンダー側で直してください" in registered
+
+        pending = line_handler._format_analysis_result(
+            self._result([task]), children=[], pending_confirm=True, warnings_by_id=warnings_by_id
+        )
+        assert "下のボタンで登録するか決めてください" in pending
+        assert "Googleカレンダー側で直してください" not in pending
 
     def test_todo_deadline_uses_weekday_format(self, monkeypatch):
         import dates
