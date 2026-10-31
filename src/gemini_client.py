@@ -210,12 +210,15 @@ def _parse_response(text: str) -> dict:
         if "summary" not in result:
             result["summary"] = "要約を取得できませんでした。"
         tasks = result.get("tasks")
-        # title が文字列でないタスクは後段（表示・重複判定・DB保存）で扱えないので除外する
+        tasks = tasks if isinstance(tasks, list) else []
+        # title が文字列でないタスクは後段（表示・重複判定・DB保存）で扱えないので除外する。
+        # 黙って落とすと保護者が欠落に気づけないので、件数だけ返信側に渡す（内容はログにも出さない）
         result["tasks"] = [
             _normalize_task(t)
-            for t in (tasks if isinstance(tasks, list) else [])
+            for t in tasks
             if isinstance(t, dict) and isinstance(t.get("title"), str) and t["title"].strip()
         ]
+        result["dropped_task_count"] = len(tasks) - len(result["tasks"])
         if "notes" not in result:
             result["notes"] = []
         if "grade" not in result:
@@ -230,6 +233,7 @@ def _parse_response(text: str) -> dict:
             "tasks": [],
             "notes": [],
             "grade": None,
+            "dropped_task_count": 0,
         }
 
 

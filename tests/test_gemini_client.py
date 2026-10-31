@@ -153,3 +153,11 @@ class TestNormalizeTask:
         # title が数値・null・空文字のタスクは表示も重複判定もできないので落とす
         tasks = self._parse_tasks('[{"title": 123}, {"title": null}, {"title": "  "}, {"title": "ok"}]')
         assert [t["title"] for t in tasks] == ["ok"]
+
+    def test_dropped_task_count_is_reported(self):
+        # 除外した件数は返信で保護者に知らせるために残す
+        result = _parse_response('{"summary": "s", "tasks": [{"title": null}, "junk", {"title": "ok"}]}')
+        assert result["dropped_task_count"] == 2
+        assert _parse_response('{"summary": "s", "tasks": [{"title": "ok"}]}')["dropped_task_count"] == 0
+        assert _parse_response('{"summary": "s"}')["dropped_task_count"] == 0
+        assert _parse_response("not json")["dropped_task_count"] == 0

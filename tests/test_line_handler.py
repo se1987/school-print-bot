@@ -143,6 +143,16 @@ class TestFormatAnalysisResult:
         assert "ご確認ください" in text
         assert "Googleカレンダー側で直してください" not in text
 
+    def test_footer_reports_dropped_tasks(self):
+        import line_handler
+
+        result = {"grade": None, "summary": "s", "tasks": [], "notes": [], "dropped_task_count": 2}
+        text = line_handler._format_analysis_result(result, children=[])
+        assert "⚠️ 2件は名前を読み取れなかったため保存していません" in text
+
+        result["dropped_task_count"] = 0
+        assert "読み取れなかった" not in line_handler._format_analysis_result(result, children=[])
+
     def test_footer_guides_to_calendar_only_when_registered(self, monkeypatch):
         import dates
         import line_handler

@@ -649,13 +649,21 @@ def _format_analysis_result(
             lines.append(f"  ・{note}")
 
     # --- フッター ---
-    has_footer_info = tasks or skipped_count or re_registered_count or pending_existing_count
+    dropped_count = result.get("dropped_task_count", 0)
+    has_footer_info = (
+        tasks or skipped_count or re_registered_count or pending_existing_count or dropped_count
+    )
     if has_footer_info:
         lines.append(f"\n━━━━━━━━━━━━━━━━━")
         if tasks:
             lines.append(f"✅ {len(tasks)}件の予定・タスクを保存しました")
         if warning_count:
             lines.append(_warning_footer(warning_count, cal_count + re_registered_count > 0, pending_confirm))
+        if dropped_count:
+            lines.append(
+                f"⚠️ {dropped_count}件は名前を読み取れなかったため保存していません。"
+                "プリントを確認し、必要なら撮り直して送ってください"
+            )
         if skipped_count:
             lines.append(f"⏭️ {skipped_count}件は既に登録済みのためスキップしました")
         if cal_count > 0 or re_registered_count > 0:
