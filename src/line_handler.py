@@ -572,7 +572,7 @@ def _format_analysis_result(
     lines = []
 
     if "error" in result:
-        return f"⚠️ 解析中にエラーが発生しました:\n{result['error']}"
+        return f"⚠️ 解析中にエラーが発生しました。\n{result['error']}"
 
     grade = result.get("grade")
     if grade:

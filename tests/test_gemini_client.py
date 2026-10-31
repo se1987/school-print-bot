@@ -1,11 +1,14 @@
 """
 gemini_client.py のテスト
 - _parse_response: Gemini APIレスポンスのJSONパース
+- _user_error_message: APIエラーのユーザー向けメッセージ変換
 """
 
 import json
 
-from gemini_client import _parse_response
+from google.genai import errors
+
+from gemini_client import _parse_response, _user_error_message
 
 VALID_RESPONSE = {
     "grade": "1年",
@@ -67,3 +70,31 @@ class TestParseResponse:
     def test_empty_string_fallback(self):
         result = _parse_response("")
         assert "tasks" in result
+
+
+class TestUserErrorMessage:
+    def test_prepayment_depleted(self):
+        e = errors.ClientError(402, {"error": {"code": 402, "message": "Your prepayment credits are depleted.", "status": "RESOURCE_EXHAUSTED"}})
+        msg = _user_error_message(e)
+        assert "残高が不足" in msg
+        assert "管理者" in msg
+        assert "ai.studio" not in msg
+
+    def test_rate_limited(self):
+        e = errors.ClientError(429, {"error": {"code": 429, "message": "Quota exceeded", "status": "RESOURCE_EXHAUSTED"}})
+        msg = _user_error_message(e)
+        assert "上限" in msg
+        assert "管理者" in msg
+
+    def test_invalid_api_key(self):
+        e = errors.ClientError(400, {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key.", "status": "INVALID_ARGUMENT"}})
+        assert "認証" in _user_error_message(e)
+
+    def test_server_error(self):
+        e = errors.ServerError(503, {"error": {"code": 503, "message": "The model is overloaded.", "status": "UNAVAILABLE"}})
+        assert "混み合って" in _user_error_message(e)
+
+    def test_unknown_error_hides_details(self):
+        msg = _user_error_message(RuntimeError("secret internal detail"))
+        assert "secret" not in msg
+        assert "もう一度" in msg
