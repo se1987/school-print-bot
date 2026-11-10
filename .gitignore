@@ -9,3 +9,8 @@ venv/
 .idea/
 .vscode/
 scripts/credentials.json
+
+# Claude Code の個人用設定。「今後は確認しない」で許可したコマンドが平文で記録され、
+# コマンド内のパスワードやトークンも残るため、絶対にコミットしない
+.claude/settings.local.json
+CLAUDE.local.md
