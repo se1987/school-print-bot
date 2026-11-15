@@ -240,3 +240,68 @@ class TestUpdateTaskPrintId:
         after = get_unregistered_tasks_for_print(print_id_2, "user1")
         assert len(after) == 1
         assert after[0]["title"] == "運動会"
+
+
+class TestDateFilters:
+    """「今日」は SQL 関数ではなく JST の日付を Python から渡す（SQLite / PostgreSQL 共通）"""
+
+    def _save(self, due_dates):
+        import database
+        print_id = save_print("U1", "原文", "要約")
+        return database.save_tasks(
+            print_id, "U1", [{"title": f"t{d}", "due_date": d} for d in due_dates]
+        )
+
+    def test_pending_tasks_start_from_today_jst(self, setup_db, monkeypatch):
+        from datetime import date
+        import database
+        import dates
+
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 11, 5))
+        self._save(["2026-11-04", "2026-11-05", "2026-11-06"])
+        assert [t["due_date"] for t in database.get_pending_tasks("U1")] == ["2026-11-05", "2026-11-06"]
+
+    def test_reminder_targets_exact_day_and_skips_reminded(self, setup_db, monkeypatch):
+        from datetime import date
+        import database
+        import dates
+
+        # 月末をまたぐ「翌日」も正しく計算される
+        monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 11, 30))
+        ids = self._save(["2026-11-30", "2026-12-01", "2026-12-02"])
+        assert [t["id"] for t in database.get_tasks_for_reminder(days_before=0)] == [ids[0]]
+        assert [t["id"] for t in database.get_tasks_for_reminder(days_before=1)] == [ids[1]]
+        database.mark_task_reminded(ids[1])
+        assert database.get_tasks_for_reminder(days_before=1) == []
+
+
+class TestSearchPrints:
+    def test_created_at_is_string(self, setup_db):
+        """line_handler が created_at[:10] で日付を切り出すので、どちらのDBでも文字列で返す"""
+        import re
+        import database
+
+        save_print("U1", "遠足のお知らせ", "遠足")
+        save_print("U2", "遠足のお知らせ", "遠足")
+        results = database.search_prints("U1", "遠足")
+        assert len(results) == 1
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", results[0]["created_at"][:10])
+
+
+class TestCalendarMode:
+    def test_default_and_upsert(self, setup_db):
+        import database
+
+        assert database.get_calendar_mode("U1") == "auto"
+        database.set_calendar_mode("U1", "ask")
+        database.set_calendar_mode("U1", "off")
+        assert database.get_calendar_mode("U1") == "off"
+
+
+class TestClaimOnce:
+    def test_same_value_is_claimed_only_once(self, setup_db):
+        import database
+
+        assert database.claim_once("grades_advanced_year", "2026") is True
+        assert database.claim_once("grades_advanced_year", "2026") is False
+        assert database.claim_once("grades_advanced_year", "2027") is True

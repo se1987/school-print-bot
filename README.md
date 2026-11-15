@@ -10,7 +10,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 ```text
 マチコミ → [スクショ/PDF] → LINE Bot → FastAPI → Gemini API（解析）
                                           ↓
-                                     SQLite（保存）
+                          SQLite / PostgreSQL（保存）
                                        ↓         ↓
                               LINE通知        Google Calendar
                             （リマインド）    → TimeTree連携
@@ -62,7 +62,9 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 
 1. **LINE Developers** → Messaging APIチャネル作成
 2. **Google AI Studio** → Gemini APIキー取得
-3. **Render** → ホスティング（有料の Starter プラン + Persistent Disk が必要）
+3. ホスティング（下記のどちらか）
+   - **Google Cloud Run + PostgreSQL（Supabase など）+ Cloud Scheduler** → 無料枠で運用する構成
+   - **Railway** → 常時起動 + Volume 上の SQLite で動かす構成（有料）
 
 ### 手順
 
@@ -102,17 +104,33 @@ docker compose down
 
 > SQLite のデータは `./data/` にボリュームマウントされるため、コンテナを再起動してもデータは保持されます。
 
-### Render デプロイ
+### デプロイ
 
-構成は `render.yaml`（Blueprint）に定義済みです。Docker でビルドし、SQLite 用の Persistent Disk を `/app/data` にマウントします。
+同じコードが 2 通りの構成で動きます。違いは「データの置き場所」と「毎朝の通知を誰が起こすか」だけで、環境変数で切り替わります。
 
-1. GitHubにpush
-2. Render → New → Blueprint → このリポジトリを選択
-3. 入力を求められる `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY`（と、カレンダー連携を使うなら `GOOGLE_CALENDAR_CREDENTIALS_JSON`）を設定（`PORT` は Render が自動注入）
-4. デプロイ完了後、サービスの URL（`https://<サービス名>.onrender.com`）を確認
-5. LINE Developers → Webhook URL に `https://<サービス名>.onrender.com/callback` を設定
+| | Cloud Run 構成（無料枠） | Railway 構成 |
+|---|---|---|
+| データ | PostgreSQL（`DATABASE_URL`） | Volume 上の SQLite（`DB_PATH`） |
+| 定期ジョブ | Cloud Scheduler が `/cron/*` を叩く（`SCHEDULER_MODE=external`） | プロセス内スケジューラー（既定の `internal`） |
+| 起動 | リクエストが来たときだけ | 常時 |
 
-> 無料プランでは動きません。Persistent Disk が使えず再デプロイのたびに SQLite が消えるうえ、無通信 15 分でスリープするため毎朝 7:00 のリマインドが送られません。
+#### Cloud Run 構成
+
+1. PostgreSQL を用意する（Supabase の場合は Transaction pooler の接続文字列を使う）
+2. 秘密情報を Secret Manager に登録し、`gcloud run deploy --source .` でデプロイ
+3. Cloud Scheduler に 2 つのジョブ（毎朝 7:00 のリマインド / 4 月 1 日の進級）を登録
+4. LINE Developers → Webhook URL に `https://<Cloud Run の URL>/callback` を設定
+
+コマンドと注意点は [docs/operations.md](docs/operations.md) の §5 にまとめています。
+
+#### Railway 構成
+
+1. Railway → New Project → Deploy from GitHub
+2. Variables に `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY`, `DB_PATH` を設定（`PORT` は Railway が自動注入）
+3. `DB_PATH` のディレクトリに Volume をマウント（しないと再デプロイで SQLite が消える）
+4. Generate Domain → LINE Developers の Webhook URL に `https://your-app.up.railway.app/callback` を設定
+
+> どちらか一方だけを動かしてください。両方が動いていると、朝のリマインドが二重に届きます。
 
 ### Google Calendar連携（オプション）
 
@@ -133,7 +151,7 @@ python scripts/authorize_google.py
 1. 出力されたJSONを環境変数に設定:
 
 ```bash
-# .env または Render の Environment
+# .env または本番環境の環境変数（Cloud Run は Secret Manager、Railway は Variables）
 GOOGLE_CALENDAR_CREDENTIALS_JSON='{"token": "...", "refresh_token": "...", ...}'
 ```
 

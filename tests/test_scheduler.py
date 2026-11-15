@@ -196,3 +196,26 @@ class TestSchedulerTimezone:
 
         april = triggers["advance_grades"].get_next_fire_time(None, base)
         assert april.astimezone(sched_mod.JST).strftime("%m-%d %H:%M") == "04-01 09:00"
+
+
+class TestAdvanceGradesIdempotent:
+    def test_second_call_in_same_year_does_nothing(self, setup_db, monkeypatch):
+        """外部 cron のリトライで2回呼ばれても、進級は年1回だけ"""
+        import asyncio
+
+        import database
+        import line_client
+        import scheduler as sched_mod
+
+        sent = []
+
+        async def fake_push(user_id, text):
+            sent.append(user_id)
+
+        monkeypatch.setattr(line_client, "push_text", fake_push)
+        database.add_child("U1", "たろう", "1年")
+
+        assert asyncio.run(sched_mod.advance_grades_april()) is True
+        assert asyncio.run(sched_mod.advance_grades_april()) is False
+        assert database.get_children("U1")[0]["grade"] == "2年"
+        assert sent == ["U1"]

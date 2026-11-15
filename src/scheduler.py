@@ -209,9 +209,17 @@ def _advance_grade(grade: str) -> tuple[str, bool]:
     return f"{prefix}{num + 1}年", False
 
 
-async def advance_grades_april():
-    """4月1日 9時 JST に全員の学年を1つ進める"""
+async def advance_grades_april() -> bool:
+    """4月1日 9時 JST に全員の学年を1つ進める。実行したら True、今年分が実行済みなら False。
+
+    外部 cron から呼ばれる場合はリトライなどで二重に届くことがあり、2回進級させると
+    取り返しがつかないので、年ごとに1回だけ実行する。
+    """
     from line_client import push_text
+    year = str(_jst_today().year)
+    if not db.claim_once("grades_advanced_year", year):
+        logger.info("[Scheduler] %s年の進級処理は実行済みのためスキップ", year)
+        return False
     logger.info("[Scheduler] 学年自動進級処理開始")
     children = db.get_all_children()
     for child in children:
@@ -235,6 +243,7 @@ async def advance_grades_april():
         except Exception as e:
             logger.error("[Scheduler] %s への進級通知失敗: %s", child["user_id"], e)
     logger.info("[Scheduler] %d 件の学年を処理しました", len(children))
+    return True
 
 
 def start_scheduler():
