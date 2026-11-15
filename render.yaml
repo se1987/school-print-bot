@@ -1,0 +1,32 @@
+# Render Blueprint（Infrastructure as Code）
+# ダッシュボード → New → Blueprint でこのリポジトリを選ぶと、下記の構成でサービスが作られる。
+# 運用上の注意は docs/operations.md を参照。
+services:
+  - type: web
+    name: school-print-bot
+    runtime: docker # ルートの Dockerfile をそのままビルドする
+    region: singapore # 日本に最も近いリージョン
+    # 無料プランは不可: Persistent Disk が使えず SQLite が消える。さらに無通信 15 分で
+    # スリープするため、プロセス内の APScheduler（毎朝 7:00 のリマインド）が動かない。
+    plan: starter
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass # CI（pytest）が通ったコミットだけを自動デプロイ
+    disk:
+      name: school-print-bot-data
+      mountPath: /app/data # DB_PATH のディレクトリと必ず一致させる
+      sizeGB: 1
+    envVars:
+      - key: DB_PATH
+        value: /app/data/school_prints.db
+      - key: GOOGLE_CALENDAR_ID
+        value: primary
+      # 秘密情報はリポジトリに置かず、Blueprint 作成時にダッシュボードで入力する
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_CALENDAR_CREDENTIALS_JSON
+        sync: false
+      # PORT は Render が自動注入する（既定 10000）ので設定しない

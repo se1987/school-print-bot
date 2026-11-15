@@ -62,7 +62,7 @@ LINEにプリントを送ると、AIがタスクを自動抽出 → カレンダ
 
 1. **LINE Developers** → Messaging APIチャネル作成
 2. **Google AI Studio** → Gemini APIキー取得
-3. **Railway** → ホスティング
+3. **Render** → ホスティング（有料の Starter プラン + Persistent Disk が必要）
 
 ### 手順
 
@@ -102,13 +102,17 @@ docker compose down
 
 > SQLite のデータは `./data/` にボリュームマウントされるため、コンテナを再起動してもデータは保持されます。
 
-### Railway デプロイ
+### Render デプロイ
+
+構成は `render.yaml`（Blueprint）に定義済みです。Docker でビルドし、SQLite 用の Persistent Disk を `/app/data` にマウントします。
 
 1. GitHubにpush
-2. Railway → New Project → Deploy from GitHub
-3. Variables に `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY` を設定（`PORT` は Railway が自動注入）
-4. Generate Domain → URLを取得
-5. LINE Developers → Webhook URL に `https://your-app.up.railway.app/callback` を設定
+2. Render → New → Blueprint → このリポジトリを選択
+3. 入力を求められる `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `GEMINI_API_KEY`（と、カレンダー連携を使うなら `GOOGLE_CALENDAR_CREDENTIALS_JSON`）を設定（`PORT` は Render が自動注入）
+4. デプロイ完了後、サービスの URL（`https://<サービス名>.onrender.com`）を確認
+5. LINE Developers → Webhook URL に `https://<サービス名>.onrender.com/callback` を設定
+
+> 無料プランでは動きません。Persistent Disk が使えず再デプロイのたびに SQLite が消えるうえ、無通信 15 分でスリープするため毎朝 7:00 のリマインドが送られません。
 
 ### Google Calendar連携（オプション）
 
@@ -129,7 +133,7 @@ python scripts/authorize_google.py
 1. 出力されたJSONを環境変数に設定:
 
 ```bash
-# .env または Railway Variables
+# .env または Render の Environment
 GOOGLE_CALENDAR_CREDENTIALS_JSON='{"token": "...", "refresh_token": "...", ...}'
 ```
 

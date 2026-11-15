@@ -1,16 +1,18 @@
 # 運用メモ（operations.md）
 
-Railway 本番運用で踏んだ「消えやすい設定」の記録。
+本番運用（Render。以前は Railway）で踏んだ「消えやすい設定」の記録。
 再デプロイ・環境再構築で同じ罠を踏み直さないための、未来の自分向けメモ。
 コードは Git が覚えているが、コンソール上の設定は誰も覚えていないので、ここに残す。
 
-## 1. Railway Volume（SQLite の永続化）
+## 1. Render Persistent Disk（SQLite の永続化）
 
 - 症状: 再デプロイのたびに SQLite のデータ（解析済みプリント・タスク・子ども登録）が消える
-- 原因: Railway のコンテナ FS は揮発性で、Volume の外に置いたものは再構築で保持されない
-- 対処: DB ファイルの置き場所（`DB_PATH` のディレクトリ）に Volume をマウント済み
+- 原因: コンテナ FS は揮発性で、Disk の外に置いたものは再構築で保持されない（Railway の Volume でも同じだった）
+- 対処: `render.yaml` で Disk を `/app/data` にマウントし、`DB_PATH=/app/data/school_prints.db` を指定済み
 - 確認: redeploy 後に DB の中身が残っているか（**設定の有無ではなく、データの実在を確認する**）
-- 注意: Volume はマウントパス配下しか守らない。`DB_PATH` とマウントパスがズレていると、Volume が存在していても揮発性側に書き続ける（一度これで再消失した）
+- 注意: Disk はマウントパス配下しか守らない。`DB_PATH` とマウントパスがズレていると、Disk が存在していても揮発性側に書き続ける（Railway 時代に一度これで再消失した）。`render.yaml` の `mountPath` と `DB_PATH` は必ずセットで変更する
+- 注意: Disk は有料プラン専用。プランを無料に下げると Disk ごと使えなくなる。また無料プランは無通信 15 分でスリープし、プロセス内スケジューラ（毎朝 7:00 のリマインド）が止まる
+- 補足: Disk 付きサービスは 1 インスタンス固定で、デプロイ時は旧インスタンス停止 → 新インスタンス起動の順になるため短時間の停止が出る（家族向けなので許容）
 
 ## 2. Google OAuth の公開（本番化）
 
@@ -18,7 +20,7 @@ Railway 本番運用で踏んだ「消えやすい設定」の記録。
 - 原因: 同意画面が「テスト」だとリフレッシュトークンが7日で失効する
 - 対処: 同意画面を「公開（本番）」に変更済み
 - 確認: 8日以上経過後もカレンダー登録が動くか
-- 再認証手順: `python scripts/authorize_google.py` → 出力 JSON を Railway の `GOOGLE_CALENDAR_CREDENTIALS_JSON` に再設定
+- 再認証手順: `python scripts/authorize_google.py` → 出力 JSON を Render（該当サービス → Environment）の `GOOGLE_CALENDAR_CREDENTIALS_JSON` に再設定
 - 補足: 月1運用ではトークンが「使うたびに必ず失効している」形で現れる（7日 < 利用間隔のため）。エラーはログ上「PDF 処理エラー」の名前で出ることがあった（`RefreshError` の突き抜け。コード側は捕捉して縮退運転するよう修正済み）
 
 ## 3. Gemini API の課金設定
@@ -47,11 +49,11 @@ Railway 本番運用で踏んだ「消えやすい設定」の記録。
 | `GOOGLE_CALENDAR_CREDENTIALS_JSON` | refresh_token と client_secret を含む。カレンダーの予定を読み書きできる（スコープは `calendar.events` のみ） | 中 |
 
 `GOOGLE_CALENDAR_ID` / `DB_PATH` / `PORT` は秘密ではないので対象外。
-SQLite の中身は環境変数ではなく Volume 上にあるため、環境変数の漏えいとは別の話。
+SQLite の中身は環境変数ではなく Disk 上にあるため、環境変数の漏えいとは別の話。
 
 ### 手順（この順番で）
 
-0. **通知メールの真偽を確認する**: メール内のリンクは踏まず、ブラウザから直接ホスティング側（Railway）にログインしてお知らせ・公式ブログで同じ内容を確認する
+0. **通知メールの真偽を確認する**: メール内のリンクは踏まず、ブラウザから直接ホスティング側（Render）にログインしてお知らせ・公式ブログで同じ内容を確認する
 1. **Gemini**: Google AI Studio で新しいキーを発行 → 古いキーを削除。AI Studio の使用量と GCP Billing に見覚えのない利用がないか確認する
 2. **LINE**: LINE Developers コンソール → 該当チャネル
    - 「Messaging API 設定」でチャネルアクセストークンを再発行
@@ -62,15 +64,28 @@ SQLite の中身は環境変数ではなく Volume 上にあるため、環境�
    - GCP Console → 認証情報 → OAuth クライアントで「シークレットをリセット」→ 新しい `credentials.json` を `scripts/` に置く
    - `python scripts/authorize_google.py` を実行 → 出力 JSON を控える
    - Google カレンダーに見覚えのない予定の追加・削除がないか確認する
-4. **Railway**: 4 変数を新しい値に差し替え → Redeploy
+4. **Render**: 該当サービス → Environment で 4 変数を新しい値に差し替え → 保存して再デプロイ
 5. **動作確認**: LINE で `通知テスト` → リマインダーが返る / 画像を 1 枚送信 → Gemini 解析とカレンダー登録が通る
-6. **アカウント周辺**: Railway のパスワード変更と 2 段階認証。GitHub の Settings → Security log / Applications に見覚えのないアクセス・連携がないか確認（Railway は GitHub 連携でデプロイしているため）
+6. **アカウント周辺**: Render のパスワード変更と 2 段階認証。GitHub の Settings → Security log / Applications に見覚えのないアクセス・連携がないか確認（Render は GitHub 連携でデプロイしているため）
 
 ### 注意
 
 - 順番の意図: 課金被害が出る Gemini を最初に止める。LINE と Google は「古い値の無効化」と「新しい値の投入」が同時にできないので、停止時間を短くするため手順 1〜3 で新しい値を揃えてから手順 4 でまとめて投入する
 - Google OAuth は手順 3 の 1 つ目（アクセス削除）だけでも refresh_token は無効になるが、client_secret も JSON に含まれているのでリセットまでやる
-- ローテーション後に `RefreshError` が出る場合は、古い JSON が Railway に残っている（差し替え漏れ）か、同意画面が「テスト」に戻っている（§2 参照）のどちらか
+- ローテーション後に `RefreshError` が出る場合は、古い JSON が Render に残っている（差し替え漏れ）か、同意画面が「テスト」に戻っている（§2 参照）のどちらか
+
+## 5. Railway → Render 移行手順
+
+コード側の準備（`render.yaml`）は済んでいる。残りはコンソール操作で、順番を間違えると Bot が二重に動く／止まる。
+
+1. **Render にサービスを作る**: New → Blueprint → このリポジトリ。秘密情報 4 変数を入力する（支払い情報の登録が必要）
+   - Railway 側に置いていた値をそのまま写すより、この機会に §4 の手順で作り直した値を入れるほうが安全
+2. **起動確認**: `https://<サービス名>.onrender.com/health` が `{"status": "healthy"}` を返すこと、ログに「起動完了」が出ること
+3. **データを移す（任意）**: Railway の Volume から `school_prints.db` を取り出し、Render の Disk（`/app/data/`）に置いてサービスを再起動する。子ども登録だけなら LINE から `子ども登録` をやり直すほうが早い
+4. **Webhook を切り替える**: LINE Developers → Messaging API 設定 → Webhook URL を `https://<サービス名>.onrender.com/callback` に変更 →「検証」
+5. **動作確認**: LINE で `通知テスト` → 画像を 1 枚送信（§4 手順 5 と同じ）
+6. **Railway を止める**: サービスを停止・削除する。**両方が動いている間は朝のリマインドが二重に届く**ので、手順 4 のあと日をまたがずに止める。Railway 側に残る環境変数も削除する
+7. **§1 の確認**: Render で一度 redeploy し、DB の中身が残っていることを確かめる
 
 ## 付記: LINE Webhook の 499
 

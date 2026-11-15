@@ -18,7 +18,7 @@ pytest tests/ -v
 # Run locally (with hot reload)
 python src/main.py
 
-# Production (Railway)
+# Production (Render — the Dockerfile CMD runs this; see render.yaml)
 uvicorn main:app --host 0.0.0.0 --port $PORT --app-dir src
 
 # One-off scripts
@@ -115,13 +115,19 @@ Re-uploading a print whose tasks already exist re-registers tasks that were not 
 
 - The calendar integration calls the Google Calendar REST API directly from deterministic Python code (scope: `calendar.events`). Gemini only extracts data; it does not call Google APIs. The app does not use Google Workspace MCP. Not using MCP alone does not settle whether Google classifies the OAuth client as agentic, though — in `auto` mode Gemini's output decides which events are created on the user's behalf. When Google changes its agentic-client rules (e.g. the `is_agentic` setting), assess the client against Google's current criteria in the Cloud Console docs rather than relying on this note.
 - The OAuth consent screen must be in production ("公開") — in testing mode refresh tokens expire after 7 days.
-- Re-auth: run `scripts/authorize_google.py` and replace `GOOGLE_CALENDAR_CREDENTIALS_JSON` in Railway.
+- Re-auth: run `scripts/authorize_google.py` and replace `GOOGLE_CALENDAR_CREDENTIALS_JSON` in Render (service → Environment).
 
-## Deployment (Railway)
+## Deployment (Render)
+
+The service is defined in `render.yaml` (Blueprint): Docker runtime, Singapore region, `starter` plan, health check on `/health`, a 1 GB Persistent Disk mounted at `/app/data`, and `DB_PATH=/app/data/school_prints.db`. Secrets are declared with `sync: false` and entered in the dashboard.
 
 1. Push to GitHub
-2. Set env vars in Railway dashboard
-3. Set LINE webhook URL to `https://your-app.up.railway.app/callback`
-4. Mount a Railway Volume on the directory of `DB_PATH` — the container filesystem is ephemeral, so SQLite data is lost on redeploy otherwise
+2. Render → New → Blueprint → select this repository, then fill in the secret env vars
+3. Set LINE webhook URL to `https://<service-name>.onrender.com/callback`
 
-See `docs/operations.md` for console-side settings that are easy to lose (Volume, OAuth publishing, Gemini billing) and the secret-rotation runbook for a suspected leak.
+Constraints to keep in mind:
+- The free plan does not work: no Persistent Disk (SQLite is lost on every deploy) and the instance sleeps after 15 idle minutes, which stops the in-process APScheduler reminders.
+- The disk only protects files under its mount path, so `DB_PATH` must stay inside `/app/data`. A service with a disk runs as a single instance and each deploy has a short downtime (the old instance stops before the new one starts).
+- `autoDeployTrigger: checksPass` — only commits whose CI passed are deployed.
+
+See `docs/operations.md` for console-side settings that are easy to lose (Disk, OAuth publishing, Gemini billing), the secret-rotation runbook for a suspected leak, and the Railway → Render migration steps.

@@ -151,7 +151,7 @@ async def callback(request: Request):
 
 @app.get("/health")
 async def health():
-    """Railway のヘルスチェック用"""
+    """Render のヘルスチェック用（render.yaml の healthCheckPath）"""
     return {"status": "healthy"}
 
 
