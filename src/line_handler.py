@@ -579,13 +579,21 @@ async def _delete_tasks(event, user_id: str, ids: list[int]):
         await reply_text(event.reply_token, "ℹ️ 削除する予定はありませんでした（すでに削除済みかもしれません）。")
         return
 
+    task_ids = [t["id"] for t in tasks]
     calendar_failed: list[dict] = []
+    handled_events: set[str] = set()
     for task in tasks:
         event_id = task.get("calendar_event_id")
-        if event_id and not google_calendar.delete_calendar_event(event_id):
+        if not event_id or event_id in handled_events:
+            continue
+        handled_events.add(event_id)
+        # 同じイベントを他のタスク（他のユーザー含む）が参照していれば、カレンダーには残す
+        if db.is_calendar_event_shared(event_id, task_ids):
+            continue
+        if not google_calendar.delete_calendar_event(event_id):
             calendar_failed.append(task)
 
-    deleted = db.delete_tasks(user_id, [t["id"] for t in tasks])
+    deleted = db.delete_tasks(user_id, task_ids)
     lines = [f"✅ {deleted}件の予定を削除しました"]
     if calendar_failed:
         lines.append(

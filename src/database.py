@@ -209,6 +209,23 @@ def get_tasks_by_ids(user_id: str, task_ids: list[int]) -> list[dict]:
         return [_deserialize_task(row) for row in rows]
 
 
+def is_calendar_event_shared(event_id: str, exclude_task_ids: list[int]) -> bool:
+    """そのカレンダーイベントを、削除対象以外のタスク（他のユーザー含む）がまだ参照しているか
+
+    カレンダーは全ユーザーで1つを共有し、同日・同タイトルのイベントは使い回すため、
+    削除してよいのは誰も参照しなくなったときだけ。
+    """
+    if not event_id:
+        return False
+    sql = "SELECT 1 FROM tasks WHERE calendar_event_id = ?"
+    if exclude_task_ids:
+        # 空の NOT IN () は SQLite で構文エラー、NOT IN (NULL) は常に偽になるので、空なら条件ごと省く
+        sql += f" AND id NOT IN ({','.join('?' for _ in exclude_task_ids)})"
+    with get_connection() as conn:
+        row = conn.execute(sql + " LIMIT 1", (event_id, *exclude_task_ids)).fetchone()
+        return row is not None
+
+
 def delete_tasks(user_id: str, task_ids: list[int]) -> int:
     """そのユーザーのタスクを削除し、削除した件数を返す"""
     if not task_ids:

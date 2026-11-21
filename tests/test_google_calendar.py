@@ -253,3 +253,11 @@ class TestDeleteCalendarEvent:
         with patch("google_calendar._build_service") as build:
             assert google_calendar.delete_calendar_event("") is True
         build.assert_not_called()
+
+    def test_transport_error_returns_false(self):
+        with patch("google_calendar._build_service", return_value=self._service(TimeoutError("timed out"))):
+            assert google_calendar.delete_calendar_event("evt1") is False
+
+    def test_service_build_error_returns_false(self):
+        with patch("google_calendar._build_service", side_effect=OSError("network down")):
+            assert google_calendar.delete_calendar_event("evt1") is False

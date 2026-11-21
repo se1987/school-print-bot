@@ -179,10 +179,10 @@ def delete_calendar_event(event_id: str) -> bool:
     """カレンダーのイベントを削除する。既に無い（404/410）場合も削除済みとして True を返す"""
     if not event_id:
         return True
-    service = _build_service()
-    if service is None:
-        return False
     try:
+        service = _build_service()
+        if service is None:
+            return False
         service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
         logger.info("[Calendar] イベント削除成功: %s", event_id)
         return True
@@ -195,4 +195,7 @@ def delete_calendar_event(event_id: str) -> bool:
         return False
     except RefreshError as e:
         _log_refresh_error(e)
+        return False
+    except Exception as e:  # noqa: BLE001 — タイムアウト等の通信エラーでも削除処理全体を止めない
+        logger.error("[Calendar] イベント削除中の通信エラー: %s", e)
         return False

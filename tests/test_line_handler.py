@@ -276,6 +276,7 @@ class TestTaskDelete:
             return event_id != "e2"  # e2 だけカレンダー削除に失敗
 
         monkeypatch.setattr(line_handler.google_calendar, "delete_calendar_event", fake_delete_event)
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: False)
         asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2, 3]))
         assert deleted_events == ["e1", "e2"]
         assert deleted_ids == [1, 2, 3]
@@ -290,3 +291,25 @@ class TestTaskDelete:
         monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: [])
         asyncio.run(line_handler._delete_tasks(self._event(), "U1", [5]))
         assert "削除する予定はありませんでした" in sent[0][1]
+
+    def test_delete_keeps_calendar_event_shared_with_others(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        tasks = [
+            {"id": 1, "title": "A", "due_date": "2026-11-05", "task_type": "event", "calendar_event_id": "shared"},
+            {"id": 2, "title": "B", "due_date": "2026-11-06", "task_type": "event", "calendar_event_id": "mine"},
+            {"id": 3, "title": "B'", "due_date": "2026-11-06", "task_type": "event", "calendar_event_id": "mine"},
+        ]
+        deleted_events = []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: len(ids))
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: eid == "shared")
+        monkeypatch.setattr(
+            line_handler.google_calendar, "delete_calendar_event",
+            lambda eid: deleted_events.append(eid) or True,
+        )
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2, 3]))
+        # 他のタスクが参照するイベントは消さず、同じイベントは1回だけ消す
+        assert deleted_events == ["mine"]
+        assert "3件の予定を削除しました" in sent[0][1]
