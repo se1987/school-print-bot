@@ -192,6 +192,36 @@ def get_all_tasks(user_id: str) -> list[dict]:
         return [_deserialize_task(row) for row in rows]
 
 
+def get_tasks_by_ids(user_id: str, task_ids: list[int]) -> list[dict]:
+    """指定した ID のうち、そのユーザーのタスクだけを返す（他人のタスクは含めない）"""
+    if not task_ids:
+        return []
+    placeholders = ",".join("?" for _ in task_ids)
+    with get_connection() as conn:
+        rows = conn.execute(
+            f"""SELECT id, title, description, due_date, task_type, target_grades, dismissal_times,
+                       is_registered_to_calendar, calendar_event_id
+                FROM tasks
+                WHERE user_id = ? AND id IN ({placeholders})
+                ORDER BY due_date ASC, id ASC""",
+            (user_id, *task_ids),
+        ).fetchall()
+        return [_deserialize_task(row) for row in rows]
+
+
+def delete_tasks(user_id: str, task_ids: list[int]) -> int:
+    """そのユーザーのタスクを削除し、削除した件数を返す"""
+    if not task_ids:
+        return 0
+    placeholders = ",".join("?" for _ in task_ids)
+    with get_connection() as conn:
+        cur = conn.execute(
+            f"DELETE FROM tasks WHERE user_id = ? AND id IN ({placeholders})",
+            (user_id, *task_ids),
+        )
+        return cur.rowcount
+
+
 def find_duplicate_task(user_id: str, title: str, due_date: str | None) -> dict | None:
     """同一ユーザー・タイトル・日付の既存タスクを検索（重複検出用）
 

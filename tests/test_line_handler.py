@@ -179,3 +179,114 @@ class TestFormatAnalysisResult:
         task = {"title": "上履きを持たせる", "due_date": "2026-11-06", "task_type": "task"}
         text = line_handler._format_analysis_result(self._result([task]), children=[])
         assert "上履きを持たせる（〜11/6(金)）" in text
+
+
+class TestTaskDelete:
+    """予定削除コマンド: 番号の読み取り・確認ボタン・削除（DB とカレンダーはモック）"""
+
+    def _event(self):
+        from types import SimpleNamespace
+        return SimpleNamespace(reply_token="tok")
+
+    def _capture(self, monkeypatch):
+        import line_handler
+        sent = []
+
+        async def fake_reply(token, text):
+            sent.append(("reply", text, None))
+
+        async def fake_reply_qr(token, text, items):
+            sent.append(("reply_qr", text, items))
+
+        monkeypatch.setattr(line_handler, "reply_text", fake_reply)
+        monkeypatch.setattr(line_handler, "reply_text_with_quick_reply", fake_reply_qr)
+        return sent
+
+    def test_parse_task_ids_accepts_various_forms(self):
+        from line_handler import _parse_task_ids
+        assert _parse_task_ids("12 15") == [12, 15]
+        assert _parse_task_ids("#12、#15,12") == [12, 15]
+        assert _parse_task_ids("１２　１５") == [12, 15]  # 全角
+        assert _parse_task_ids("") == []
+        assert _parse_task_ids("0 abc") == []
+
+    def test_command_pattern(self):
+        from line_handler import _TASK_DELETE_RE
+        assert _TASK_DELETE_RE.match("予定削除 12 15").group(1) == "12 15"
+        assert _TASK_DELETE_RE.match("タスク削除12").group(1) == "12"
+        assert _TASK_DELETE_RE.match("予定削除").group(1) == ""
+        assert _TASK_DELETE_RE.match("子ども削除 たろう") is None
+
+    def test_confirm_shows_targets_and_buttons(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        tasks = [
+            {"id": 12, "title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event",
+             "calendar_event_id": "evt"},
+        ]
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        asyncio.run(line_handler._confirm_delete_tasks(self._event(), "U1", "12 99"))
+        [(kind, text, items)] = sent
+        assert kind == "reply_qr"
+        assert "#12 親子ふれあい活動" in text
+        assert "カレンダーからも削除" in text
+        assert "見つからなかった番号: #99" in text
+        assert items[0] == ("削除する", "action=task_delete&ids=12")
+        assert items[1][1] == "action=task_delete_cancel"
+
+    def test_confirm_without_numbers_shows_usage(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        asyncio.run(line_handler._confirm_delete_tasks(self._event(), "U1", ""))
+        assert sent[0][0] == "reply" and "例: 予定削除 12" in sent[0][1]
+
+    def test_confirm_rejects_too_many(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        many = " ".join(str(i) for i in range(1, line_handler.MAX_DELETE_TASKS + 2))
+        asyncio.run(line_handler._confirm_delete_tasks(self._event(), "U1", many))
+        assert "までです" in sent[0][1]
+
+    def test_postback_data_fits_line_limit(self):
+        import line_handler
+        ids = ",".join(str(100000 + i) for i in range(line_handler.MAX_DELETE_TASKS))
+        assert len(f"action=task_delete&ids={ids}") <= 300
+
+    def test_delete_removes_tasks_and_calendar_events(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        tasks = [
+            {"id": 1, "title": "A", "due_date": "2026-11-05", "task_type": "event", "calendar_event_id": "e1"},
+            {"id": 2, "title": "B", "due_date": "2026-11-06", "task_type": "event", "calendar_event_id": "e2"},
+            {"id": 3, "title": "C", "due_date": None, "task_type": "task", "calendar_event_id": None},
+        ]
+        deleted_events, deleted_ids = [], []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        monkeypatch.setattr(
+            line_handler.db, "delete_tasks",
+            lambda uid, ids: deleted_ids.extend(ids) or len(ids),
+        )
+
+        def fake_delete_event(event_id):
+            deleted_events.append(event_id)
+            return event_id != "e2"  # e2 だけカレンダー削除に失敗
+
+        monkeypatch.setattr(line_handler.google_calendar, "delete_calendar_event", fake_delete_event)
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2, 3]))
+        assert deleted_events == ["e1", "e2"]
+        assert deleted_ids == [1, 2, 3]
+        text = sent[0][1]
+        assert "3件の予定を削除しました" in text
+        assert "Googleカレンダーからは削除できませんでした" in text and "#2 B" in text
+
+    def test_delete_when_nothing_found(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: [])
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [5]))
+        assert "削除する予定はありませんでした" in sent[0][1]

@@ -173,3 +173,26 @@ def _insert_event(service, task: dict, title: str, due_date: str, end_date: str)
     except HttpError as e:
         logger.error("[Calendar] イベント登録エラー: %s", e)
         return None
+
+
+def delete_calendar_event(event_id: str) -> bool:
+    """カレンダーのイベントを削除する。既に無い（404/410）場合も削除済みとして True を返す"""
+    if not event_id:
+        return True
+    service = _build_service()
+    if service is None:
+        return False
+    try:
+        service.events().delete(calendarId=CALENDAR_ID, eventId=event_id).execute()
+        logger.info("[Calendar] イベント削除成功: %s", event_id)
+        return True
+    except HttpError as e:
+        status = getattr(getattr(e, "resp", None), "status", None)
+        if status in (404, 410):
+            logger.info("[Calendar] イベントは既に削除済み: %s", event_id)
+            return True
+        logger.error("[Calendar] イベント削除エラー: %s", e)
+        return False
+    except RefreshError as e:
+        _log_refresh_error(e)
+        return False
