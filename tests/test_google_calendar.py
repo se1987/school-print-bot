@@ -208,3 +208,56 @@ class TestRegisterTaskToCalendar:
 
         assert result is None
         mock_events.insert.assert_not_called()
+
+
+class TestDeleteCalendarEvent:
+    def _service(self, side_effect=None):
+        service = MagicMock()
+        service.events.return_value.delete.return_value.execute.side_effect = side_effect
+        return service
+
+    def test_deletes_event(self):
+        service = self._service()
+        with patch("google_calendar._build_service", return_value=service):
+            assert google_calendar.delete_calendar_event("evt1") is True
+        service.events.return_value.delete.assert_called_once_with(
+            calendarId=google_calendar.CALENDAR_ID, eventId="evt1"
+        )
+
+    @pytest.mark.parametrize("status", [404, 410])
+    def test_already_gone_counts_as_deleted(self, status):
+        from googleapiclient.errors import HttpError
+
+        err = HttpError(resp=MagicMock(status=status), content=b"gone")
+        with patch("google_calendar._build_service", return_value=self._service(err)):
+            assert google_calendar.delete_calendar_event("evt1") is True
+
+    def test_other_http_error_returns_false(self):
+        from googleapiclient.errors import HttpError
+
+        err = HttpError(resp=MagicMock(status=500), content=b"boom")
+        with patch("google_calendar._build_service", return_value=self._service(err)):
+            assert google_calendar.delete_calendar_event("evt1") is False
+
+    def test_refresh_error_returns_false(self):
+        from google.auth.exceptions import RefreshError
+
+        with patch("google_calendar._build_service", return_value=self._service(RefreshError("invalid_grant"))):
+            assert google_calendar.delete_calendar_event("evt1") is False
+
+    def test_no_service_returns_false(self):
+        with patch("google_calendar._build_service", return_value=None):
+            assert google_calendar.delete_calendar_event("evt1") is False
+
+    def test_empty_event_id_is_noop(self):
+        with patch("google_calendar._build_service") as build:
+            assert google_calendar.delete_calendar_event("") is True
+        build.assert_not_called()
+
+    def test_transport_error_returns_false(self):
+        with patch("google_calendar._build_service", return_value=self._service(TimeoutError("timed out"))):
+            assert google_calendar.delete_calendar_event("evt1") is False
+
+    def test_service_build_error_returns_false(self):
+        with patch("google_calendar._build_service", side_effect=OSError("network down")):
+            assert google_calendar.delete_calendar_event("evt1") is False

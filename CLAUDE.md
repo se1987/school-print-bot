@@ -102,8 +102,9 @@ Re-uploading a print whose tasks already exist re-registers tasks that were not 
 |-------|--------|
 | Image/PDF | Analyze with Gemini, store tasks, register to calendar per mode |
 | Keyword text | Full-text search of past prints |
-| `タスク一覧` | List pending tasks |
-| `全タスク` | List all tasks including overdue |
+| `タスク一覧` | List pending tasks (each with its `#id`) |
+| `全タスク` | List all tasks including overdue (each with its `#id`) |
+| `予定削除 ID [ID ...]` (also `タスク削除`) | Delete own tasks by the `#id` shown in the lists: shows the targets with Quick Reply `task_delete` / `task_delete_cancel` postbacks, then deletes the rows and, for registered ones, the Google Calendar event (`delete_calendar_event`; 404/410 count as already gone). Up to 30 per command (postback data ≤ 300 chars) |
 | `通知テスト` | Run the reminder immediately |
 | `子ども登録 NAME GRADE` | Register child (e.g., `子ども登録 たろう 1年`) |
 | `子ども一覧` | List children |
