@@ -5,6 +5,7 @@ LINE Bot Webhook ハンドラー
 
 import logging
 import re
+import unicodedata
 
 from linebot.v3.webhooks import (
     MessageEvent,
@@ -73,6 +74,14 @@ async def handle_postback(event: PostbackEvent):
             await _set_calendar_mode(event, user_id, mode)
         else:
             await reply_text(event.reply_token, "⚠️ 不明なカレンダーモードです。")
+        return
+
+    if action == "task_delete":
+        await _delete_tasks(event, user_id, _parse_task_ids(params.get("ids", "")))
+        return
+
+    if action == "task_delete_cancel":
+        await reply_text(event.reply_token, "✅ 削除をやめました。予定はそのまま残っています。")
         return
 
     logger.info("[Handler] 未知のpostback: %s", data)
@@ -221,6 +230,10 @@ _CHILD_VARIANTS = r"(?:子ども|子供|こども)"
 
 _CHILD_REGISTER_RE = re.compile(rf"{_CHILD_VARIANTS}登録\s+(.+?)\s+(\S+年)")
 _CHILD_DELETE_RE = re.compile(rf"{_CHILD_VARIANTS}削除\s+(.+)")
+# 「予定削除 12 15」「タスク削除 #12、#15」など。番号は全タスク／タスク一覧の #番号
+_TASK_DELETE_RE = re.compile(r"(?:予定|タスク)削除\s*(.*)")
+# 1回で削除できる件数の上限（確認ボタンの postback data は LINE の上限 300 文字に収める）
+MAX_DELETE_TASKS = 30
 _CHILD_LIST_KEYWORDS = {"子ども一覧", "子ども", "子供一覧", "子供", "こども一覧", "こども"}
 _CHILD_REGISTER_KEYWORDS = {"子ども登録", "子供登録", "こども登録"}
 
@@ -254,6 +267,11 @@ async def handle_text(event: MessageEvent):
     child_del = _CHILD_DELETE_RE.match(text)
     if child_del:
         await _delete_child(event, user_id, child_del.group(1))
+        return
+
+    task_del = _TASK_DELETE_RE.match(text)
+    if task_del:
+        await _confirm_delete_tasks(event, user_id, task_del.group(1))
         return
 
     if text in ("タスク一覧", "タスク"):
@@ -447,7 +465,7 @@ async def _show_pending_tasks(event, user_id):
             for task in relevant:
                 emoji = "📅" if task["task_type"] == "event" else "✏️"
                 due = task["due_date"] or "日付未定"
-                lines.append(f"  {emoji} {task['title']}（{due}）")
+                lines.append(f"  {emoji} #{task['id']} {task['title']}（{due}）")
                 dismissal = db.get_dismissal_time_for_child(task, child["grade"])
                 if dismissal:
                     lines.append(f"     ⏰ 下校: {dismissal}")
@@ -457,13 +475,14 @@ async def _show_pending_tasks(event, user_id):
         for task in tasks:
             emoji = "📅" if task["task_type"] == "event" else "✏️"
             due = task["due_date"] or "日付未定"
-            lines.append(f"{emoji} {task['title']}（{due}）")
+            lines.append(f"{emoji} #{task['id']} {task['title']}（{due}）")
             times = task.get("dismissal_times", [])
             for dt in times:
                 lines.append(f"   ⏰ {dt['grades']}: {dt['time']}")
             lines.append("")
         lines.append("💡 「子ども登録」で学年に合わせた表示になります")
 
+    lines.append(_DELETE_HINT)
     await reply_text(event.reply_token, "\n".join(lines))
 
 
@@ -482,8 +501,106 @@ async def _show_all_tasks(event, user_id):
         emoji = "📅" if task["task_type"] == "event" else "✏️"
         due = task["due_date"] or "日付未定"
         expired = " ⚠️期限切れ" if task["due_date"] and task["due_date"] < today else ""
-        lines.append(f"{emoji} {task['title']}（{due}）{expired}")
+        lines.append(f"{emoji} #{task['id']} {task['title']}（{due}）{expired}")
     lines.append(f"\n合計 {len(tasks)} 件")
+    lines.append(_DELETE_HINT)
+    await reply_text(event.reply_token, "\n".join(lines))
+
+
+_DELETE_HINT = "\n🗑 削除するには「予定削除 番号」（例: 予定削除 12 15）"
+
+
+def _parse_task_ids(text: str) -> list[int]:
+    """「12 15」「#12、#15」「１２,１５」などから重複なしの番号を順に取り出す"""
+    normalized = unicodedata.normalize("NFKC", text)
+    ids: list[int] = []
+    for token in re.findall(r"\d+", normalized):
+        task_id = int(token)
+        if task_id > 0 and task_id not in ids:
+            ids.append(task_id)
+    return ids
+
+
+def _format_task_line(task: dict) -> str:
+    emoji = "📅" if task.get("task_type") == "event" else "✏️"
+    due = format_date_ja(task["due_date"]) if task.get("due_date") else "日付未定"
+    return f"{emoji} #{task['id']} {task['title']}（{due}）"
+
+
+async def _confirm_delete_tasks(event, user_id: str, args: str):
+    """削除対象を表示し、ボタンで確認してから消す（押し間違いで消さないため）"""
+    ids = _parse_task_ids(args)
+    if not ids:
+        await reply_text(
+            event.reply_token,
+            "🗑 削除する予定の番号を指定してください。\n\n"
+            "  例: 予定削除 12\n"
+            "  例: 予定削除 12 15 20\n\n"
+            "番号は「全タスク」「タスク一覧」の #番号 です。",
+        )
+        return
+    if len(ids) > MAX_DELETE_TASKS:
+        await reply_text(
+            event.reply_token,
+            f"⚠️ 一度に削除できるのは {MAX_DELETE_TASKS} 件までです。分けて送ってください。",
+        )
+        return
+
+    tasks = db.get_tasks_by_ids(user_id, ids)
+    if not tasks:
+        await reply_text(event.reply_token, "⚠️ 指定した番号の予定は見つかりませんでした。「全タスク」で番号を確認してください。")
+        return
+
+    found = {t["id"] for t in tasks}
+    missing = [i for i in ids if i not in found]
+    lines = [f"🗑 次の {len(tasks)} 件を削除しますか？\n"]
+    lines += [_format_task_line(t) for t in tasks]
+    if any(t.get("calendar_event_id") for t in tasks):
+        lines.append("\n📅 Googleカレンダーに登録済みの予定は、カレンダーからも削除します。")
+    if missing:
+        lines.append("\n⚠️ 見つからなかった番号: " + "、".join(f"#{i}" for i in missing))
+    lines.append("\n下のボタンで選んでください 👇")
+
+    ids_param = ",".join(str(t["id"]) for t in tasks)
+    await reply_text_with_quick_reply(
+        event.reply_token,
+        "\n".join(lines),
+        [
+            ("削除する", f"action=task_delete&ids={ids_param}"),
+            ("やめる", "action=task_delete_cancel"),
+        ],
+    )
+
+
+async def _delete_tasks(event, user_id: str, ids: list[int]):
+    """確認ボタンが押された予定を削除する。カレンダー登録済みならカレンダーからも消す"""
+    tasks = db.get_tasks_by_ids(user_id, ids[:MAX_DELETE_TASKS])
+    if not tasks:
+        await reply_text(event.reply_token, "ℹ️ 削除する予定はありませんでした（すでに削除済みかもしれません）。")
+        return
+
+    task_ids = [t["id"] for t in tasks]
+    calendar_failed: list[dict] = []
+    handled_events: set[str] = set()
+    for task in tasks:
+        event_id = task.get("calendar_event_id")
+        if not event_id or event_id in handled_events:
+            continue
+        handled_events.add(event_id)
+        # 同じイベントを他のタスク（他のユーザー含む）が参照していれば、カレンダーには残す
+        if db.is_calendar_event_shared(event_id, task_ids):
+            continue
+        if not google_calendar.delete_calendar_event(event_id):
+            calendar_failed.append(task)
+
+    deleted = db.delete_tasks(user_id, task_ids)
+    lines = [f"✅ {deleted}件の予定を削除しました"]
+    if calendar_failed:
+        lines.append(
+            f"\n⚠️ 次の {len(calendar_failed)} 件は、Googleカレンダーからは削除できませんでした。"
+            "カレンダー側で直接削除してください。"
+        )
+        lines += [_format_task_line(t) for t in calendar_failed]
     await reply_text(event.reply_token, "\n".join(lines))
 
 
@@ -542,6 +659,9 @@ async def _show_help(event):
         "→ 未対応タスクを表示\n\n"
         "📋 「全タスク」\n"
         "→ 期限切れ含む全タスクを表示\n\n"
+        "🗑 「予定削除 番号」\n"
+        "→ 一覧の #番号 の予定を削除\n"
+        "  例: 予定削除 12 15\n\n"
         "🔔 「通知テスト」\n"
         "→ リマインド通知を即時実行\n\n"
         "👶 「子ども登録 名前 ◯年」\n"

@@ -4,6 +4,7 @@ database.py のテスト
 - 子ども CRUD
 """
 
+import database
 from database import (
     _extract_grade_number,
     _grade_in_range,
@@ -240,3 +241,65 @@ class TestUpdateTaskPrintId:
         after = get_unregistered_tasks_for_print(print_id_2, "user1")
         assert len(after) == 1
         assert after[0]["title"] == "運動会"
+
+
+class TestGetAndDeleteTasksByIds:
+    def _seed(self):
+        print_id = save_print("user1", "テスト", "テスト要約")
+        ids = save_tasks(print_id, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+            {"title": "遠足", "due_date": "2026-05-20", "task_type": "event"},
+        ])
+        other_print = save_print("user2", "テスト", "テスト要約")
+        other_ids = save_tasks(other_print, "user2", [
+            {"title": "参観日", "due_date": "2026-05-15", "task_type": "event"},
+        ])
+        return ids, other_ids
+
+    def test_returns_only_own_tasks(self, setup_db):
+        ids, other_ids = self._seed()
+        tasks = database.get_tasks_by_ids("user1", ids + other_ids)
+        assert [t["id"] for t in tasks] == ids
+        assert "calendar_event_id" in tasks[0]
+
+    def test_empty_ids(self, setup_db):
+        assert database.get_tasks_by_ids("user1", []) == []
+        assert database.delete_tasks("user1", []) == 0
+
+    def test_delete_only_own_tasks(self, setup_db):
+        ids, other_ids = self._seed()
+        # 他人のタスク番号を混ぜても、自分のものしか消えない
+        assert database.delete_tasks("user1", [ids[0]] + other_ids) == 1
+        assert [t["id"] for t in database.get_all_tasks("user1")] == [ids[1]]
+        assert [t["id"] for t in database.get_all_tasks("user2")] == other_ids
+
+
+class TestIsCalendarEventShared:
+    def test_shared_with_other_user(self, setup_db):
+        p1 = save_print("user1", "テスト", "要約")
+        [a] = save_tasks(p1, "user1", [{"title": "運動会", "due_date": "2026-05-10", "task_type": "event"}])
+        p2 = save_print("user2", "テスト", "要約")
+        [b] = save_tasks(p2, "user2", [{"title": "運動会", "due_date": "2026-05-10", "task_type": "event"}])
+        mark_task_registered(a, "evt_shared")
+        mark_task_registered(b, "evt_shared")
+        assert database.is_calendar_event_shared("evt_shared", [a]) is True
+
+    def test_not_shared_when_only_deleted_tasks_reference_it(self, setup_db):
+        p1 = save_print("user1", "テスト", "要約")
+        ids = save_tasks(p1, "user1", [
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+            {"title": "運動会", "due_date": "2026-05-10", "task_type": "event"},
+        ])
+        for task_id in ids:
+            mark_task_registered(task_id, "evt_mine")
+        assert database.is_calendar_event_shared("evt_mine", ids) is False
+
+    def test_empty_event_id(self, setup_db):
+        assert database.is_calendar_event_shared("", [1]) is False
+
+    def test_empty_exclusion_counts_every_reference(self, setup_db):
+        p1 = save_print("user1", "テスト", "要約")
+        [a] = save_tasks(p1, "user1", [{"title": "運動会", "due_date": "2026-05-10", "task_type": "event"}])
+        mark_task_registered(a, "evt")
+        assert database.is_calendar_event_shared("evt", []) is True
+        assert database.is_calendar_event_shared("evt_none", []) is False
