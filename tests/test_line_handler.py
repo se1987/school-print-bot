@@ -198,7 +198,11 @@ class TestTaskDelete:
         async def fake_reply_qr(token, text, items):
             sent.append(("reply_qr", text, items))
 
+        async def fake_push(user_id, text):
+            sent.append(("push", text, None))
+
         monkeypatch.setattr(line_handler, "reply_text", fake_reply)
+        monkeypatch.setattr(line_handler, "push_text", fake_push)
         monkeypatch.setattr(line_handler, "reply_text_with_quick_reply", fake_reply_qr)
         return sent
 
@@ -222,14 +226,14 @@ class TestTaskDelete:
         import line_handler
         sent = self._capture(monkeypatch)
         tasks = [
-            {"id": 12, "title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event",
+            {"id": 12, "title": "作品展の搬入", "due_date": "2026-12-03", "task_type": "event",
              "calendar_event_id": "evt"},
         ]
         monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
         asyncio.run(line_handler._confirm_delete_tasks(self._event(), "U1", "12 99"))
         [(kind, text, items)] = sent
         assert kind == "reply_qr"
-        assert "#12 親子ふれあい活動" in text
+        assert "#12 作品展の搬入" in text
         assert "カレンダーからも削除" in text
         assert "見つからなかった番号: #99" in text
         assert items[0] == ("削除する", "action=task_delete&ids=12")
@@ -280,7 +284,10 @@ class TestTaskDelete:
         asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2, 3]))
         assert deleted_events == ["e1", "e2"]
         assert deleted_ids == [1, 2, 3]
-        text = sent[0][1]
+        # カレンダー削除がある時は、先に開始を返信し、結果は push で送る
+        assert sent[0] == ("reply", "🗑️ 3件の予定を削除中...", None)
+        assert sent[1][0] == "push"
+        text = sent[1][1]
         assert "3件の予定を削除しました" in text
         assert "Googleカレンダーからは削除できませんでした" in text and "#2 B" in text
 
@@ -312,4 +319,80 @@ class TestTaskDelete:
         asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2, 3]))
         # 他のタスクが参照するイベントは消さず、同じイベントは1回だけ消す
         assert deleted_events == ["mine"]
-        assert "3件の予定を削除しました" in sent[0][1]
+        assert sent[-1][0] == "push" and "3件の予定を削除しました" in sent[-1][1]
+
+    def test_delete_without_calendar_replies_once(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        tasks = [{"id": 3, "title": "C", "due_date": None, "task_type": "task", "calendar_event_id": None}]
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: len(ids))
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [3]))
+        # カレンダーに無い予定だけなら、push を使わず返信1回で済ませる
+        assert [k for k, _, _ in sent] == ["reply"]
+        assert "1件の予定を削除しました" in sent[0][1]
+
+    def test_delete_refetches_after_reply(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        fetched = [
+            [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"},
+             {"id": 2, "title": "B", "due_date": "2026-12-04", "task_type": "event", "calendar_event_id": None}],
+            # 返信中に #2 がカレンダー登録された
+            [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"},
+             {"id": 2, "title": "B", "due_date": "2026-12-04", "task_type": "event", "calendar_event_id": "e2"}],
+        ]
+        deleted_events = []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: fetched.pop(0))
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: len(ids))
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: False)
+        monkeypatch.setattr(
+            line_handler.google_calendar, "delete_calendar_event",
+            lambda eid: deleted_events.append(eid) or True,
+        )
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2]))
+        # 返信後に付いたカレンダー予定も消す
+        assert deleted_events == ["e1", "e2"]
+        assert sent[-1][0] == "push" and "2件の予定を削除しました" in sent[-1][1]
+
+    def test_delete_continues_when_start_reply_fails(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+
+        async def failing_reply(token, text):
+            raise RuntimeError("reply token expired")
+
+        monkeypatch.setattr(line_handler, "reply_text", failing_reply)
+        tasks = [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"}]
+        deleted_ids = []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: deleted_ids.extend(ids) or len(ids))
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: False)
+        monkeypatch.setattr(line_handler.google_calendar, "delete_calendar_event", lambda eid: True)
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1]))
+        assert deleted_ids == [1]
+        assert sent[-1][0] == "push" and "1件の予定を削除しました" in sent[-1][1]
+
+    def test_calendar_register_refetches_after_reply(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        fetched = [
+            [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}],  # 返信前
+            [{"id": 2, "title": "B"}],  # 返信中に #1 が削除された
+        ]
+        registered = []
+        monkeypatch.setattr(line_handler.google_calendar, "is_calendar_enabled", lambda: True)
+        monkeypatch.setattr(line_handler.db, "get_unregistered_tasks_for_print", lambda pid, uid: fetched.pop(0))
+        monkeypatch.setattr(
+            line_handler.google_calendar, "register_task_to_calendar",
+            lambda task: registered.append(task["id"]) or f"evt{task['id']}",
+        )
+        monkeypatch.setattr(line_handler.db, "mark_task_registered", lambda tid, eid: None)
+        asyncio.run(line_handler._handle_calendar_decision(self._event(), "U1", "cal_register", 7))
+        # 削除済みの #1 は登録しない
+        assert registered == [2]
+        assert sent[-1] == ("push", "✅ 1件をGoogleカレンダーに登録しました", None)
