@@ -117,14 +117,14 @@ class TestFormatAnalysisResult:
 
         monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
         task = {
-            "title": "親子ふれあい活動",
+            "title": "秋の読書会",
             "due_date": "2026-11-05",
             "task_type": "event",
-            "source_text": "5日(木) 親子ふれあい活動",
+            "source_text": "5日(木) 秋の読書会",
         }
         text = line_handler._format_analysis_result(self._result([task]), children=[])
-        assert "親子ふれあい活動 (11/5(木))" in text
-        assert "📝 原文:「5日(木) 親子ふれあい活動」" in text
+        assert "秋の読書会 (11/5(木))" in text
+        assert "📝 原文:「5日(木) 秋の読書会」" in text
         assert "⚠️" not in text
 
     def test_shows_warnings_and_footer_count(self, monkeypatch):
@@ -132,7 +132,7 @@ class TestFormatAnalysisResult:
         import line_handler
 
         monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
-        task = {"title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event"}
+        task = {"title": "秋の読書会", "due_date": "2026-11-05", "task_type": "event"}
         warnings_by_id = {id(task): ["⚠️ 曜日が合いません: テスト"]}
         text = line_handler._format_analysis_result(
             self._result([task]), children=[], warnings_by_id=warnings_by_id
@@ -158,7 +158,7 @@ class TestFormatAnalysisResult:
         import line_handler
 
         monkeypatch.setattr(dates, "today_jst", lambda: date(2026, 10, 31))
-        task = {"title": "親子ふれあい活動", "due_date": "2026-11-05", "task_type": "event"}
+        task = {"title": "秋の読書会", "due_date": "2026-11-05", "task_type": "event"}
         warnings_by_id = {id(task): ["⚠️ テスト"]}
         registered = line_handler._format_analysis_result(
             self._result([task]), children=[], cal_count=1, warnings_by_id=warnings_by_id
