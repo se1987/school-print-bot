@@ -135,8 +135,8 @@ class TestNormalizeTask:
 
     def test_source_text_is_trimmed_and_truncated(self):
         long_text = "あ" * 100
-        tasks = self._parse_tasks(f'[{{"title": "a", "source_text": "  5日(水)\\n 親子ふれあい活動 "}}, {{"title": "b", "source_text": "{long_text}"}}]')
-        assert tasks[0]["source_text"] == "5日(水) 親子ふれあい活動"
+        tasks = self._parse_tasks(f'[{{"title": "a", "source_text": "  5日(水)\\n 秋の読書会 "}}, {{"title": "b", "source_text": "{long_text}"}}]')
+        assert tasks[0]["source_text"] == "5日(水) 秋の読書会"
         assert len(tasks[1]["source_text"]) == 60
 
     def test_non_string_source_text_becomes_none(self):

@@ -13,7 +13,7 @@ from verification import check_tasks
 TODAY = date(2026, 10, 31)
 
 
-def _task(title="親子ふれあい活動", due="2026-11-05", weekday=None):
+def _task(title="秋の読書会", due="2026-11-05", weekday=None):
     return {"title": title, "due_date": due, "weekday_on_print": weekday}
 
 
@@ -52,7 +52,7 @@ class TestConsecutiveDuplicate:
         assert warnings[0] == warnings[1]
 
     def test_ignores_title_spacing_and_case(self):
-        tasks = [_task(title="親子 ふれあい活動", due="2026-11-05"), _task(title="親子ふれあい活動", due="2026-11-06")]
+        tasks = [_task(title="秋の 読書会", due="2026-11-05"), _task(title="秋の読書会", due="2026-11-06")]
         warnings = check_tasks(tasks, today=TODAY)
         assert warnings[0] and warnings[1]
 
