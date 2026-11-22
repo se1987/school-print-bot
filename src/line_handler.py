@@ -383,6 +383,9 @@ async def _handle_calendar_decision(event, user_id: str, action: str, print_id: 
 
     await reply_text(event.reply_token, f"📅 {len(pending)}件をカレンダーに登録中...")
 
+    # 返信を待つ間に予定削除が確定している可能性があるので、登録の直前に取り直す。
+    # 取り直しから登録完了までは await を挟まない（途中で削除が割り込まないように）
+    pending = db.get_unregistered_tasks_for_print(print_id, user_id)
     cal_count = 0
     for task in pending:
         event_id = google_calendar.register_task_to_calendar(task)
@@ -580,6 +583,12 @@ async def _delete_tasks(event, user_id: str, ids: list[int]):
         return
 
     task_ids = [t["id"] for t in tasks]
+    # カレンダー削除は1件ずつ API を呼ぶので時間がかかる。返信トークンが切れる前に
+    # 開始だけ返信し、結果は push で送る。カレンダーに無い予定だけなら即返信で済ませる
+    uses_calendar = any(t.get("calendar_event_id") for t in tasks)
+    if uses_calendar:
+        await reply_text(event.reply_token, f"🗑️ {len(tasks)}件の予定を削除中...")
+
     calendar_failed: list[dict] = []
     handled_events: set[str] = set()
     for task in tasks:
@@ -601,7 +610,10 @@ async def _delete_tasks(event, user_id: str, ids: list[int]):
             "カレンダー側で直接削除してください。"
         )
         lines += [_format_task_line(t) for t in calendar_failed]
-    await reply_text(event.reply_token, "\n".join(lines))
+    if uses_calendar:
+        await push_text(user_id, "\n".join(lines))
+    else:
+        await reply_text(event.reply_token, "\n".join(lines))
 
 
 async def _test_reminder(event, user_id):
