@@ -582,13 +582,23 @@ async def _delete_tasks(event, user_id: str, ids: list[int]):
         await reply_text(event.reply_token, "ℹ️ 削除する予定はありませんでした（すでに削除済みかもしれません）。")
         return
 
-    task_ids = [t["id"] for t in tasks]
     # カレンダー削除は1件ずつ API を呼ぶので時間がかかる。返信トークンが切れる前に
     # 開始だけ返信し、結果は push で送る。カレンダーに無い予定だけなら即返信で済ませる
     uses_calendar = any(t.get("calendar_event_id") for t in tasks)
     if uses_calendar:
-        await reply_text(event.reply_token, f"🗑️ {len(tasks)}件の予定を削除中...")
+        try:
+            await reply_text(event.reply_token, f"🗑️ {len(tasks)}件の予定を削除中...")
+        except Exception:
+            # 開始の知らせが届かなくても削除は止めない（結果は push で届く）
+            logger.exception("[Handler] 削除開始の返信に失敗しました。削除は続行します")
+        # 返信を待つ間にカレンダー登録が進んでいる可能性があるので、取り直してから消す。
+        # 取り直しから DB 削除までは await を挟まない（登録済みの予定を取りこぼさないように）
+        tasks = db.get_tasks_by_ids(user_id, ids[:MAX_DELETE_TASKS])
+        if not tasks:
+            await push_text(user_id, "ℹ️ 削除する予定はありませんでした（すでに削除済みかもしれません）。")
+            return
 
+    task_ids = [t["id"] for t in tasks]
     calendar_failed: list[dict] = []
     handled_events: set[str] = set()
     for task in tasks:

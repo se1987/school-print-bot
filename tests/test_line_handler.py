@@ -333,6 +333,49 @@ class TestTaskDelete:
         assert [k for k, _, _ in sent] == ["reply"]
         assert "1件の予定を削除しました" in sent[0][1]
 
+    def test_delete_refetches_after_reply(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+        fetched = [
+            [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"},
+             {"id": 2, "title": "B", "due_date": "2026-12-04", "task_type": "event", "calendar_event_id": None}],
+            # 返信中に #2 がカレンダー登録された
+            [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"},
+             {"id": 2, "title": "B", "due_date": "2026-12-04", "task_type": "event", "calendar_event_id": "e2"}],
+        ]
+        deleted_events = []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: fetched.pop(0))
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: len(ids))
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: False)
+        monkeypatch.setattr(
+            line_handler.google_calendar, "delete_calendar_event",
+            lambda eid: deleted_events.append(eid) or True,
+        )
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1, 2]))
+        # 返信後に付いたカレンダー予定も消す
+        assert deleted_events == ["e1", "e2"]
+        assert sent[-1][0] == "push" and "2件の予定を削除しました" in sent[-1][1]
+
+    def test_delete_continues_when_start_reply_fails(self, monkeypatch):
+        import asyncio
+        import line_handler
+        sent = self._capture(monkeypatch)
+
+        async def failing_reply(token, text):
+            raise RuntimeError("reply token expired")
+
+        monkeypatch.setattr(line_handler, "reply_text", failing_reply)
+        tasks = [{"id": 1, "title": "A", "due_date": "2026-12-03", "task_type": "event", "calendar_event_id": "e1"}]
+        deleted_ids = []
+        monkeypatch.setattr(line_handler.db, "get_tasks_by_ids", lambda uid, ids: tasks)
+        monkeypatch.setattr(line_handler.db, "delete_tasks", lambda uid, ids: deleted_ids.extend(ids) or len(ids))
+        monkeypatch.setattr(line_handler.db, "is_calendar_event_shared", lambda eid, ids: False)
+        monkeypatch.setattr(line_handler.google_calendar, "delete_calendar_event", lambda eid: True)
+        asyncio.run(line_handler._delete_tasks(self._event(), "U1", [1]))
+        assert deleted_ids == [1]
+        assert sent[-1][0] == "push" and "1件の予定を削除しました" in sent[-1][1]
+
     def test_calendar_register_refetches_after_reply(self, monkeypatch):
         import asyncio
         import line_handler
