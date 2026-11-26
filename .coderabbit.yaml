@@ -29,8 +29,14 @@ reviews:
   path_instructions:
     - path: "src/**/*.py"
       instructions: |
-        - CLAUDE.md の Architecture と Key Domain Logic を前提に、利用者に影響する不具合と回帰を優先する。指摘には発生条件・影響・確認すべきテストを添える。
-        - 認証情報、LINE ユーザー ID、児童の実名やプリント本文が、コード・ログ・例外メッセージに露出しないか確認する。
+        - FastAPI + LINE Messaging API + Gemini + Google Calendar の Bot。CLAUDE.md の「Architecture」「Key Domain Logic」を前提に読むこと。
+        - 公開リポジトリ。API キー・トークン・LINE ユーザー ID・子どもの実名など個人情報がコードやログ出力に紛れていないか最優先で確認する。
+        - 外部 API（LINE / Gemini / Google）の失敗が Webhook 全体を落とさないか確認する。Webhook は即時 200 を返し、重い処理はバックグラウンドで行う設計。
+        - Google Calendar の RefreshError は捕捉して縮退運転する方針。例外を握りつぶして無言で失敗するコードは指摘する。
+        - 学年の範囲表記（1〜4年 / 1-4年 / 1～4年）の判定と下校時刻の学年別出し分けはコア機能。ここに触れる変更はエッジケース（単一学年・全学年・表記ゆれ）を確認する。
+        - 日時は JST 前提。naive datetime と aware datetime の混在や、ホストのタイムゾーン依存を指摘する。
+        - SQLite のスキーマ変更は init_db の ALTER TABLE 移行で後方互換を保つこと。
+        - 利用者に影響する不具合と回帰を優先し、指摘には発生条件・影響・確認すべきテストを添える。プリント本文がログや例外メッセージに露出しないかも確認する。
     - path: "src/main.py"
       instructions: |
         - LINE の署名検証がイベントの受付・処理に先行することを確認する。署名不正やイベント処理例外の扱い、正常な Webhook が PDF 解析や外部 API の完了を待たずに 200 を返すことを確認する。
@@ -59,7 +65,9 @@ reviews:
         - 毎朝の通知と 4 月 1 日の進級がホストのタイムゾーンに依存せず JST で動くことを確認する。日付境界、児童ごとの学年、卒業学年、LINE 送信の失敗・再実行時の通知漏れや重複を確認する。
     - path: "tests/**/*.py"
       instructions: |
-        - pytest。外部 API はモックし、SQLite はテスト用に隔離する。架空の児童名・識別子を使う。
+        - pytest。テストデータは架空の名前・学年のみを使うこと。実在しそうな個人情報があれば指摘する。
+        - 外部 API を呼ぶテストはモックされているか確認する。
+        - SQLite はテスト用に隔離し、架空の識別子を使う。
         - 仕様変更に対応する失敗経路・境界値・利用者への結果を検証しているか確認する。日時依存テストは JST の基準日を固定する。
     - path: "{Dockerfile,docker-compose.yml}"
       instructions: |
