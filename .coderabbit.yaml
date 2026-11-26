@@ -29,17 +29,44 @@ reviews:
   path_instructions:
     - path: "src/**/*.py"
       instructions: |
-        - FastAPI + LINE Messaging API + Gemini + Google Calendar の Bot。CLAUDE.md の「Architecture」「Key Domain Logic」を前提に読むこと。
-        - 公開リポジトリ。API キー・トークン・LINE ユーザー ID・子どもの実名など個人情報がコードやログ出力に紛れていないか最優先で確認する。
-        - 外部 API（LINE / Gemini / Google）の失敗が Webhook 全体を落とさないか確認する。Webhook は即時 200 を返し、重い処理はバックグラウンドで行う設計。
-        - Google Calendar の RefreshError は捕捉して縮退運転する方針。例外を握りつぶして無言で失敗するコードは指摘する。
-        - 学年の範囲表記（1〜4年 / 1-4年 / 1～4年）の判定と下校時刻の学年別出し分けはコア機能。ここに触れる変更はエッジケース（単一学年・全学年・表記ゆれ）を確認する。
-        - 日時は JST 前提。naive datetime と aware datetime の混在や、ホストのタイムゾーン依存を指摘する。
-        - SQLite のスキーマ変更は init_db の ALTER TABLE 移行で後方互換を保つこと。
+        - CLAUDE.md の Architecture と Key Domain Logic を前提に、利用者に影響する不具合と回帰を優先する。指摘には発生条件・影響・確認すべきテストを添える。
+        - 認証情報、LINE ユーザー ID、児童の実名やプリント本文が、コード・ログ・例外メッセージに露出しないか確認する。
+    - path: "src/main.py"
+      instructions: |
+        - LINE の署名検証がイベントの受付・処理に先行することを確認する。署名不正やイベント処理例外の扱い、正常な Webhook が PDF 解析や外部 API の完了を待たずに 200 を返すことを確認する。
+    - path: "src/line_handler.py"
+      instructions: |
+        - メッセージと postback が送信者本人のプリント・予定・設定だけを操作することを、確認ボタン経由も含めて確認する。
+        - PDF・画像の再送やボタンの再押下で予定が重複しないか、auto / off / ask の各モード、外部 API の部分失敗、未登録の予定だけを再登録する挙動を確認する。
+        - 学年別の下校時刻と、予定日・原文引用・検証警告が該当する予定に対応していることを確認する。
+    - path: "src/line_client.py"
+      instructions: |
+        - 絵文字を含む本文の分割が LINE の UTF-16 単位の上限を守り、Quick Reply が意図したメッセージに付くか確認する。reply / push の失敗時は、成功扱いや意図しない二重送信がないか確認する。
+    - path: "src/{gemini_client,verification,dates}.py"
+      instructions: |
+        - Gemini 出力は外部入力として扱う。不正 JSON、欠損・型違い・不正な日付が処理全体を落とさず、架空の予定日を補完しないか確認する。
+        - 印字曜日と日付の不整合、同じ予定名の連日出現、年の誤読に対する既存の警告と、警告が対象タスクに対応することを確認する。今日・年の切替は JST を基準にする。
+    - path: "src/database.py"
+      instructions: |
+        - 読み取り・更新・削除の利用者境界と、途中失敗や再実行時の整合性を確認する。init_db の既存 DB からの移行と再起動時の再実行、旧行の NULL・既定値との互換性を確認する。
+        - 学年範囲の表記ゆれ（〜、～、-）、単一学年・全学年・学校種別と、児童ごとの下校時刻の出し分けを確認する。
+    - path: "src/google_calendar.py"
+      instructions: |
+        - 終日予定の終了日が排他的（予定日の翌日）であること、既存予定の重複判定、削除時の 404 / 410 の扱いを確認する。
+        - OAuth 未設定や RefreshError、API 失敗で解析・保存が中断されないことと、登録に失敗した予定が登録済みと記録されず再試行できることを確認する。
+    - path: "src/scheduler.py"
+      instructions: |
+        - 毎朝の通知と 4 月 1 日の進級がホストのタイムゾーンに依存せず JST で動くことを確認する。日付境界、児童ごとの学年、卒業学年、LINE 送信の失敗・再実行時の通知漏れや重複を確認する。
     - path: "tests/**/*.py"
       instructions: |
-        - pytest。テストデータは架空の名前・学年のみを使うこと。実在しそうな個人情報があれば指摘する。
-        - 外部 API を呼ぶテストはモックされているか確認する。
+        - pytest。外部 API はモックし、SQLite はテスト用に隔離する。架空の児童名・識別子を使う。
+        - 仕様変更に対応する失敗経路・境界値・利用者への結果を検証しているか確認する。日時依存テストは JST の基準日を固定する。
+    - path: "{Dockerfile,docker-compose.yml}"
+      instructions: |
+        - 起動コマンド・依存関係・ポート設定の整合性と、DB_PATH が永続ボリュームに対応し再デプロイ後もデータが残ることを確認する。認証情報や実データがイメージに含まれないか確認する。
+    - path: "{requirements.txt,requirements-dev.txt,.github/workflows/*.yml,.github/dependabot.yml}"
+      instructions: |
+        - 依存更新では Python 3.12、変更ライブラリの実際の呼び出し箇所、CI と本番のインストール範囲への影響を確認する。ワークフロー変更では権限、シークレットを扱う処理、pytest が実行される条件を確認する。
     - path: "scripts/**/*.py"
       instructions: |
         - 運用者が手元で実行するワンオフスクリプト。認証情報をファイルに保存する場合、そのパスが .gitignore に含まれているか確認する。
